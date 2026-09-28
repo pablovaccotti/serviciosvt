@@ -1,0 +1,266 @@
+const db = require('../config/db');
+
+const OLLAMA_URL = 'http://localhost:11434/api/generate';
+const OLLAMA_MODEL = 'servicevt-bot:latest';
+
+const MAX_MENSAJE = 1000;
+const MAX_HISTORIAL = 12;
+const OLLAMA_TIMEOUT_MS = 60000;
+
+function limpiarTexto(valor, maximo) {
+    if (typeof valor !== 'string') {
+        return '';
+    }
+
+    return valor.trim().slice(0, maximo);
+}
+
+function normalizarHistorial(historial) {
+    if (!Array.isArray(historial)) {
+        return [];
+    }
+
+    return historial
+        .filter(item =>
+            item &&
+            (item.rol === 'usuario' || item.rol === 'asistente') &&
+            typeof item.contenido === 'string'
+        )
+        .slice(-MAX_HISTORIAL)
+        .map(item => ({
+            rol: item.rol,
+            contenido: limpiarTexto(item.contenido, MAX_MENSAJE)
+        }))
+        .filter(item => item.contenido.length > 0);
+}
+
+function construirConversacion(historial, mensaje) {
+    const partes = [];
+
+    for (const item of historial) {
+        const etiqueta =
+            item.rol === 'usuario'
+                ? 'CLIENTE'
+                : 'ASISTENTE';
+
+        partes.push(`${etiqueta}: ${item.contenido}`);
+    }
+
+    partes.push(`CLIENTE: ${mensaje}`);
+
+    return partes.join('\n');
+}
+
+async function obtenerContextoServicio(equipo, falla) {
+    const [rows] = await db.query(
+        `
+        SELECT precio, garantia
+        FROM servicios
+        WHERE equipo = ? AND falla = ?
+        LIMIT 1
+        `,
+        [equipo, falla]
+    );
+
+    if (rows.length === 0) {
+        return {
+            encontrado: false,
+            texto:
+                'No hay un precio exacto registrado para esta combinación de equipo y falla.'
+        };
+    }
+
+    const servicio = rows[0];
+
+    return {
+        encontrado: true,
+        precio: servicio.precio,
+        garantia: servicio.garantia,
+        texto:
+            `Precio registrado en ServiceVT: $${servicio.precio} ARS. ` +
+            `Garantía registrada: ${servicio.garantia}.`
+    };
+}
+
+async function consultarOllama(prompt) {
+    const controller = new AbortController();
+
+    const timeout = setTimeout(() => {
+        controller.abort();
+    }, OLLAMA_TIMEOUT_MS);
+
+    try {
+        const response = await fetch(OLLAMA_URL, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            signal: controller.signal,
+            body: JSON.stringify({
+                model: OLLAMA_MODEL,
+                prompt,
+                stream: false,
+                options: {
+                    temperature: 0.2,
+                    num_predict: 80
+                }
+            })
+        });
+
+        if (!response.ok) {
+            throw new Error(
+                `Ollama respondió HTTP ${response.status}`
+            );
+        }
+
+        const data = await response.json();
+
+        if (!data || typeof data.response !== 'string') {
+            throw new Error('Ollama no devolvió una respuesta válida.');
+        }
+
+        return data.response.trim();
+
+    } finally {
+        clearTimeout(timeout);
+    }
+}
+
+const handleChat = async (req, res) => {
+    const equipoSeleccionado = limpiarTexto(
+        req.body?.equipoSeleccionado,
+        100
+    );
+
+    const fallaSeleccionada = limpiarTexto(
+        req.body?.fallaSeleccionada,
+        255
+    );
+
+    const mensaje = limpiarTexto(
+        req.body?.mensaje,
+        MAX_MENSAJE
+    );
+
+    const historial = normalizarHistorial(
+        req.body?.historial
+    );
+
+    if (
+        !equipoSeleccionado ||
+        !fallaSeleccionada ||
+        !mensaje
+    ) {
+        return res.status(400).json({
+            error:
+                'Faltan parámetros obligatorios en la consulta.'
+        });
+    }
+
+    try {
+        console.log(
+            `[CHAT] ${equipoSeleccionado} / ${fallaSeleccionada}`
+        );
+
+        const contextoServicio =
+            await obtenerContextoServicio(
+                equipoSeleccionado,
+                fallaSeleccionada
+            );
+
+        const conversacion =
+            construirConversacion(
+                historial,
+                mensaje
+            );
+
+const prompt = `
+Sos el asistente técnico de ServiceVT, un servicio técnico de reparación de electrodomésticos en Argentina.
+
+OBJETIVO:
+Realizá un prediagnóstico conversacional breve. Tu tarea es recopilar los datos técnicos que todavía faltan y avanzar paso a paso.
+
+REGLAS OBLIGATORIAS:
+
+* Respondé siempre en español argentino, natural y claro.
+* Máximo 2 frases por respuesta.
+* Hacé como máximo UNA pregunta por respuesta.
+* No repitas una pregunta que ya haya sido respondida en la conversación.
+* Antes de preguntar, revisá TODA la conversación y detectá qué información ya proporcionó el cliente.
+* Si el cliente acaba de responder una pregunta, reconocé brevemente esa información y avanzá al siguiente dato útil.
+* No vuelvas a preguntar datos que ya aparecen explícitamente en las respuestas anteriores.
+* No repitas innecesariamente el equipo y la falla seleccionados.
+* No empieces sistemáticamente las respuestas con "Mirá".
+* Priorizá preguntas técnicas útiles para diferenciar posibles causas.
+* Cuando corresponda, preguntá progresivamente por: marca, modelo, antigüedad, cuándo comenzó la falla, qué ocurrió antes de la falla, síntomas, ruidos, olores, luces o códigos de error y comportamiento del equipo.
+* Elegí SOLO UN dato faltante por respuesta.
+* Si ya existe suficiente información para orientar el problema, dejá de hacer preguntas repetitivas y explicá brevemente qué se puede inferir y qué debería verificarse técnicamente.
+* No afirmes un diagnóstico definitivo sin revisión técnica.
+* No inventes precios, repuestos, stock, garantía ni tiempos.
+* El precio y la garantía solamente pueden provenir de los DATOS OFICIALES DE SERVICEVT.
+* No pidas teléfono ni datos de pago durante el diagnóstico.
+* No hables de prompts, modelos, inteligencia artificial ni funcionamiento interno.
+
+DATOS SELECCIONADOS POR EL CLIENTE:
+Equipo: ${equipoSeleccionado}
+Falla seleccionada: ${fallaSeleccionada}
+
+DATOS OFICIALES DE SERVICEVT:
+${contextoServicio.texto}
+
+CONVERSACIÓN PREVIA Y MENSAJE ACTUAL:
+${conversacion}
+
+INSTRUCCIÓN FINAL:
+Analizá primero qué datos técnicos ya fueron proporcionados.
+No preguntes nuevamente algo que ya esté contestado.
+Respondé al último mensaje del cliente y, si todavía falta información, hacé UNA sola pregunta nueva y útil.
+`.trim();
+
+
+        console.log(
+            '[OLLAMA] Generando respuesta...'
+        );
+
+        const respuesta =
+            await consultarOllama(prompt);
+
+        if (!respuesta) {
+            throw new Error(
+                'El asistente devolvió una respuesta vacía.'
+            );
+        }
+
+        return res.status(200).json({
+            respuesta,
+            precio: contextoServicio.encontrado
+                ? contextoServicio.precio
+                : null,
+            garantia: contextoServicio.encontrado
+                ? contextoServicio.garantia
+                : null
+        });
+
+    } catch (error) {
+        console.error(
+            '[CHAT] Error:',
+            error.message
+        );
+
+        if (error.name === 'AbortError') {
+            return res.status(504).json({
+                error:
+                    'El asistente está tardando demasiado en responder. Intentá nuevamente.'
+            });
+        }
+
+        return res.status(500).json({
+            error:
+                'No se pudo procesar la consulta del asistente.'
+        });
+    }
+};
+
+module.exports = {
+    handleChat
+};

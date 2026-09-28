@@ -1,0 +1,36 @@
+const ServiceModel = require('../models/serviceModel');
+const getServices = async (req, res) => {
+    try {
+        const services = await ServiceModel.getAll();
+        res.status(200).json(services);
+    } catch (error) {
+        res.status(500).json({ error: 'Error en la base de datos.' });
+    }
+
+};
+
+
+// ... (Acá se mantiene tu función getServices anterior) ...
+
+const updateServicePrice = async (req, res) => {
+    const { id, precio } = req.body;
+    try {
+        await ServiceModel.updatePrice(id, precio);
+        res.status(200).json({ message: 'Precio actualizado con éxito en MySQL.' });
+    } catch (error) {
+        res.status(500).json({ error: 'Error al actualizar el precio.' });
+    }
+};
+
+const createService = async (req, res) => {
+    const { equipo, falla, precio, garantia } = req.body;
+    try {
+        await ServiceModel.create(equipo, falla, precio, garantia);
+        res.status(201).json({ message: 'Nueva falla registrada con éxito.' });
+    } catch (error) {
+        res.status(500).json({ error: 'Error al guardar el nuevo servicio.' });
+    }
+};
+
+module.exports = { getServices, updateServicePrice, createService };
+

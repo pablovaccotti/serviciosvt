@@ -1,0 +1,606 @@
+const crypto = require('crypto');
+const {
+    MercadoPagoConfig,
+    Preference,
+    Payment,
+    WebhookSignatureValidator,
+    InvalidWebhookSignatureError
+} = require('mercadopago');
+
+const TurnoModel = require('../models/turnoModel');
+const ServiceModel = require('../models/serviceModel');
+
+const MP_ACCESS_TOKEN = process.env.MP_ACCESS_TOKEN;
+const MP_WEBHOOK_SECRET = process.env.MP_WEBHOOK_SECRET;
+const APP_PUBLIC_URL = process.env.APP_PUBLIC_URL;
+const WHATSAPP_NUMBER = process.env.WHATSAPP_NUMBER;
+
+if (!MP_ACCESS_TOKEN) {
+    throw new Error(
+        'MP_ACCESS_TOKEN no está configurado en .env'
+    );
+}
+
+if (!APP_PUBLIC_URL) {
+    throw new Error(
+        'APP_PUBLIC_URL no está configurado en .env'
+    );
+}
+
+const client = new MercadoPagoConfig({
+    accessToken: MP_ACCESS_TOKEN,
+    options: {
+        timeout: 5000
+    }
+});
+
+const preferenceClient = new Preference(client);
+const paymentClient = new Payment(client);
+
+const esEnteroPositivo = (valor) => {
+    const numero = Number(valor);
+
+    return Number.isInteger(numero) && numero > 0;
+};
+
+const extraerTurnoId = (externalReference) => {
+    if (
+        typeof externalReference !== 'string' ||
+        !externalReference.startsWith('SVT-TURNO-')
+    ) {
+        return null;
+    }
+
+    const id = externalReference.replace(
+        'SVT-TURNO-',
+        ''
+    );
+
+    if (!/^\d+$/.test(id)) {
+        return null;
+    }
+
+    return Number(id);
+};
+
+const procesarSolicitudServicio = async (req, res) => {
+    try {
+        if (!req.user) {
+            return res.status(401).json({
+                error: 'Tenés que estar autenticado.'
+            });
+        }
+
+        const {
+            idServicio,
+            metodoPago
+        } = req.body || {};
+
+        if (!esEnteroPositivo(idServicio)) {
+            return res.status(400).json({
+                error: 'El servicio seleccionado no es válido.'
+            });
+        }
+
+        const metodosPermitidos = [
+            'efectivo_whatsapp',
+            'mercado_pago'
+        ];
+
+        if (!metodosPermitidos.includes(metodoPago)) {
+            return res.status(400).json({
+                error: 'Método de pago no válido.'
+            });
+        }
+
+        const servicio = await ServiceModel.getById(
+            Number(idServicio)
+        );
+
+        if (!servicio) {
+            return res.status(404).json({
+                error: 'El servicio seleccionado no existe.'
+            });
+        }
+
+        const precio = Number(servicio.precio);
+
+        if (!Number.isInteger(precio) || precio <= 0) {
+            return res.status(500).json({
+                error: 'El servicio tiene un precio inválido configurado.'
+            });
+        }
+
+        /*
+         * ==========================================================
+         * EFECTIVO
+         * ==========================================================
+         */
+
+        if (metodoPago === 'efectivo_whatsapp') {
+            if (!WHATSAPP_NUMBER) {
+                return res.status(500).json({
+                    error: 'El canal de WhatsApp no está configurado.'
+                });
+            }
+
+            const trabajosActivos =
+                await TurnoModel.verificarTrabajoActivo();
+
+            const estadoTurno =
+                trabajosActivos.length > 0
+                    ? 'en_lista_espera'
+                    : 'en_progreso';
+
+            await TurnoModel.crear(
+                req.user.usuariosId,
+                Number(idServicio),
+                'efectivo_whatsapp',
+                'efectivo_en_destino',
+                estadoTurno
+            );
+
+            const mensajeWA =
+                `Hola serviceVT! Quiero contratar el servicio ` +
+                `#${idServicio}. ` +
+                `Cliente ID: ${req.user.usuariosId}.`;
+
+            const urlWhatsApp =
+                `https://wa.me/${WHATSAPP_NUMBER}` +
+                `?text=${encodeURIComponent(mensajeWA)}`;
+
+            return res.status(201).json({
+                tipo: 'whatsapp',
+                url: urlWhatsApp
+            });
+        }
+
+        /*
+         * ==========================================================
+         * MERCADO PAGO
+         * ==========================================================
+         *
+         * IMPORTANTE:
+         * El turno queda pendiente de pago.
+         * NO ocupa todavía la cola de trabajo.
+         */
+
+        if (metodoPago === 'mercado_pago') {
+            const resultadoTurno =
+                await TurnoModel.crearPendientePago(
+                    req.user.usuariosId,
+                    Number(idServicio)
+                );
+
+            const turnoId = resultadoTurno.insertId;
+
+            const externalReference =
+                `SVT-TURNO-${turnoId}`;
+
+            try {
+                const preferenceResponse =
+                    await preferenceClient.create({
+                        body: {
+                            items: [
+                                {
+                                    id: String(servicio.servicios_id),
+                                    title:
+                                        `ServiceVT - ${servicio.equipo} - ${servicio.falla}`,
+                                    quantity: 1,
+                                    unit_price: precio,
+                                    currency_id: 'ARS'
+                                }
+                            ],
+
+                            external_reference:
+                                externalReference,
+
+                            notification_url:
+                                `${APP_PUBLIC_URL}/api/pagos/webhook`,
+
+                            back_urls: {
+                                success:
+                                    `${APP_PUBLIC_URL}/api/pagos/confirmar-online`,
+                                failure:
+                                    `${APP_PUBLIC_URL}/api/pagos/confirmar-online`,
+                                pending:
+                                    `${APP_PUBLIC_URL}/api/pagos/confirmar-online`
+                            }
+                        }
+                    });
+
+                if (!preferenceResponse?.id) {
+                    throw new Error(
+                        'Mercado Pago no devolvió un preference ID.'
+                    );
+                }
+
+                await TurnoModel.guardarDatosMercadoPago(
+                    turnoId,
+                    preferenceResponse.id,
+                    externalReference
+                );
+
+                return res.status(201).json({
+                    tipo: 'mercado_pago',
+                    turnoId,
+                    preferenceId: preferenceResponse.id,
+                    url: preferenceResponse.init_point
+                });
+
+            } catch (mpError) {
+                console.error(
+                    '[MERCADO PAGO] Error creando preferencia:',
+                    mpError
+                );
+
+                /*
+                 * No borramos silenciosamente el turno.
+                 * Lo dejamos pendiente para poder auditarlo.
+                 */
+                await TurnoModel.marcarPagoRechazado(
+                    turnoId
+                );
+
+                return res.status(502).json({
+                    error:
+                        'No se pudo iniciar el pago con Mercado Pago.'
+                });
+            }
+        }
+
+    } catch (error) {
+        console.error(
+            '[PAGO] Error al procesar solicitud:',
+            error
+        );
+
+        return res.status(500).json({
+            error:
+                'Error interno al procesar la solicitud.'
+        });
+    }
+};
+
+/*
+ * ================================================================
+ * WEBHOOK MERCADO PAGO
+ * ================================================================
+ */
+
+const validarWebhookMercadoPago = (req) => {
+    if (!MP_WEBHOOK_SECRET) {
+        throw new Error(
+            'MP_WEBHOOK_SECRET no está configurado.'
+        );
+    }
+
+    const xSignature =
+        req.headers['x-signature'];
+
+    const xRequestId =
+        req.headers['x-request-id'];
+
+    const dataId =
+        req.query['data.id'];
+
+    if (!xSignature || !xRequestId || !dataId) {
+        const error = new Error(
+            'WEBHOOK_HEADERS_INVALIDOS'
+        );
+
+        error.statusCode = 401;
+
+        throw error;
+    }
+
+    try {
+        WebhookSignatureValidator.validate({
+            xSignature,
+            xRequestId,
+            dataId,
+            secret: MP_WEBHOOK_SECRET
+        });
+
+        return true;
+
+    } catch (error) {
+        if (
+            error instanceof InvalidWebhookSignatureError ||
+            (
+                error instanceof RangeError &&
+                error.code ===
+                    'ERR_CRYPTO_TIMING_SAFE_EQUAL_LENGTH'
+            )
+        ) {
+            const invalidSignature =
+                new Error(
+                    'WEBHOOK_FIRMA_INVALIDA'
+                );
+
+            invalidSignature.statusCode = 401;
+
+            throw invalidSignature;
+        }
+
+        throw error;
+    }
+};
+
+const webhookMercadoPago = async (req, res) => {
+    try {
+        validarWebhookMercadoPago(req);
+
+        const tipo =
+            req.body?.type ||
+            req.query?.type;
+
+        const paymentId =
+            req.body?.data?.id ||
+            req.query?.['data.id'];
+
+        /*
+         * Solo procesamos notificaciones de pagos.
+         */
+        if (tipo !== 'payment') {
+            return res.sendStatus(200);
+        }
+
+        if (!paymentId) {
+            return res.sendStatus(200);
+        }
+
+        /*
+         * Consultamos Mercado Pago.
+         * NUNCA confiamos solamente en el contenido del webhook.
+         */
+        const payment =
+            await paymentClient.get({
+                id: String(paymentId)
+            });
+
+        if (!payment) {
+            return res.sendStatus(200);
+        }
+
+        const externalReference =
+            payment.external_reference;
+
+        const turnoId =
+            extraerTurnoId(
+                externalReference
+            );
+
+        if (!turnoId) {
+            console.warn(
+                '[WEBHOOK] External reference inválida:',
+                externalReference
+            );
+
+            return res.sendStatus(200);
+        }
+
+        const turno =
+            await TurnoModel.buscarPorId(
+                turnoId
+            );
+
+        if (!turno) {
+            console.warn(
+                '[WEBHOOK] Turno inexistente:',
+                turnoId
+            );
+
+            return res.sendStatus(200);
+        }
+
+        /*
+         * Validamos que el pago realmente corresponde
+         * al servicio del turno.
+         */
+        const montoPagado =
+            Number(payment.transaction_amount);
+
+        const montoEsperado =
+            Number(turno.precio);
+
+        const moneda =
+            payment.currency_id;
+
+        if (
+            moneda !== 'ARS' ||
+            !Number.isFinite(montoPagado) ||
+            montoPagado !== montoEsperado
+        ) {
+            console.error(
+                '[WEBHOOK] Pago rechazado por monto/moneda.',
+                {
+                    turnoId,
+                    paymentId,
+                    montoPagado,
+                    montoEsperado,
+                    moneda
+                }
+            );
+
+            await TurnoModel.marcarPagoRechazado(
+                turnoId
+            );
+
+            return res.sendStatus(200);
+        }
+
+        /*
+         * Solo APPROVED confirma el pago.
+         */
+        if (payment.status === 'approved') {
+            const resultado =
+                await TurnoModel.aprobarPagoMercadoPago(
+                    turnoId,
+                    paymentId
+                );
+
+            console.log(
+                '[WEBHOOK] Pago procesado:',
+                {
+                    turnoId,
+                    paymentId,
+                    resultado
+                }
+            );
+
+            return res.sendStatus(200);
+        }
+
+        /*
+         * pending / rejected / cancelled / etc.
+         */
+        if (
+            payment.status === 'rejected' ||
+            payment.status === 'cancelled'
+        ) {
+            await TurnoModel.marcarPagoRechazado(
+                turnoId
+            );
+        }
+
+        return res.sendStatus(200);
+
+    } catch (error) {
+        if (error.statusCode === 401) {
+            console.warn(
+                '[WEBHOOK] Solicitud no autorizada.'
+            );
+
+            return res.sendStatus(401);
+        }
+
+        console.error(
+            '[WEBHOOK] Error:',
+            error
+        );
+
+        /*
+         * Para errores internos devolvemos 500.
+         * Mercado Pago puede volver a notificar.
+         */
+        return res.sendStatus(500);
+    }
+};
+
+/*
+ * ================================================================
+ * RETORNO DEL CHECKOUT
+ * ================================================================
+ *
+ * Esta ruta NO confirma el pago.
+ * Solo informa que el usuario volvió desde Mercado Pago.
+ */
+
+const confirmarPagoOnline = async (req, res) => {
+    return res.status(200).send(`
+        <!DOCTYPE html>
+        <html lang="es">
+        <head>
+            <meta charset="UTF-8">
+            <meta name="viewport" content="width=device-width, initial-scale=1.0">
+            <title>ServiceVT - Pago</title>
+        </head>
+        <body style="
+            font-family: Arial, sans-serif;
+            text-align: center;
+            padding: 50px 20px;
+            color: #334155;
+        ">
+            <h1>Pago recibido</h1>
+
+            <p>
+                Estamos verificando el estado de tu pago.
+            </p>
+
+            <p style="font-size:14px;color:#64748b;">
+                No cierres ni realices otro pago hasta consultar
+                el estado de tu turno.
+            </p>
+        </body>
+        </html>
+    `);
+};
+
+/*
+ * ================================================================
+ * FINALIZAR TRABAJO
+ * ================================================================
+ */
+
+const finalizarTrabajoActual = async (req, res) => {
+    try {
+        if (!req.user || req.user.rol !== 'admin') {
+            return res.status(403).json({
+                error:
+                    'No tenés permisos para finalizar trabajos.'
+            });
+        }
+
+        const turnoId =
+            Number(req.body?.turnoId);
+
+        if (
+            !Number.isInteger(turnoId) ||
+            turnoId <= 0
+        ) {
+            return res.status(400).json({
+                error:
+                    'El ID del turno no es válido.'
+            });
+        }
+
+        const resultado =
+            await TurnoModel.marcarComoFinalizado(
+                turnoId
+            );
+
+        if (resultado.affectedRows === 0) {
+            return res.status(404).json({
+                error:
+                    'El turno no existe o no está actualmente en progreso.'
+            });
+        }
+
+        const siguiente =
+            await TurnoModel.obtenerSiguienteEnFila();
+
+        if (siguiente) {
+            await TurnoModel.activarTurnoPendiente(
+                siguiente.turnos_id
+            );
+        }
+
+        return res.status(200).json({
+            message:
+                'Trabajo finalizado correctamente.',
+            siguienteTurno:
+                siguiente
+                    ? siguiente.turnos_id
+                    : null
+        });
+
+    } catch (error) {
+        console.error(
+            '[FINALIZAR TRABAJO] Error:',
+            error
+        );
+
+        return res.status(500).json({
+            error:
+                'No se pudo finalizar el trabajo.'
+        });
+    }
+};
+
+module.exports = {
+    procesarSolicitudServicio,
+    confirmarPagoOnline,
+    webhookMercadoPago,
+    finalizarTrabajoActual
+};

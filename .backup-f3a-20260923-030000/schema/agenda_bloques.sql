@@ -1,0 +1,21 @@
+CREATE TABLE `agenda_bloques` (
+  `bloque_id` int(11) NOT NULL AUTO_INCREMENT,
+  `cuadrilla_id` int(11) NOT NULL,
+  `turnos_id` int(11) NOT NULL,
+  `fecha` date NOT NULL,
+  `hora_inicio` time NOT NULL,
+  `hora_fin` time NOT NULL,
+  `estado` varchar(20) NOT NULL DEFAULT 'reservado',
+  `inicio_real` datetime DEFAULT NULL,
+  `fin_real` datetime DEFAULT NULL,
+  `duracion_real_min` int(11) DEFAULT NULL,
+  `fecha_creacion` timestamp NOT NULL DEFAULT current_timestamp(),
+  `fecha_actualizacion` timestamp NOT NULL DEFAULT current_timestamp() ON UPDATE current_timestamp(),
+  PRIMARY KEY (`bloque_id`),
+  KEY `idx_bloque_cuadrilla_fecha` (`cuadrilla_id`,`fecha`,`hora_inicio`,`hora_fin`),
+  KEY `idx_bloque_turno` (`turnos_id`),
+  KEY `idx_bloque_estado` (`estado`),
+  CONSTRAINT `fk_bloque_cuadrilla` FOREIGN KEY (`cuadrilla_id`) REFERENCES `cuadrillas` (`cuadrilla_id`),
+  CONSTRAINT `fk_bloque_turno` FOREIGN KEY (`turnos_id`) REFERENCES `turnos` (`turnos_id`),
+  CONSTRAINT `ck_bloque_horas` CHECK (`hora_fin` > `hora_inicio`)
+) ENGINE=InnoDB AUTO_INCREMENT=10 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;

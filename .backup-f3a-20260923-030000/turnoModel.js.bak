@@ -1,0 +1,285 @@
+const db = require('../config/db');
+
+class TurnoModel {
+
+    static async verificarTrabajoActivo() {
+        const [rows] = await db.query(
+            `SELECT turnos_id
+             FROM turnos
+             WHERE estado_turno = 'en_progreso'
+             LIMIT 1`
+        );
+
+        return rows;
+    }
+
+    static async crear(
+        usuarioId,
+        servicioId,
+        metodoPago,
+        estadoPago,
+        estadoTurno
+    ) {
+        const [result] = await db.query(
+            `INSERT INTO turnos
+                (
+                    usuarios_id,
+                    servicios_id,
+                    metodo_pago,
+                    estado_pago,
+                    estado_turno
+                )
+             VALUES (?, ?, ?, ?, ?)`,
+            [
+                usuarioId,
+                servicioId,
+                metodoPago,
+                estadoPago,
+                estadoTurno
+            ]
+        );
+
+        return result;
+    }
+
+    static async crearPendientePago(usuarioId, servicioId) {
+        const [result] = await db.query(
+            `INSERT INTO turnos
+                (
+                    usuarios_id,
+                    servicios_id,
+                    metodo_pago,
+                    estado_pago,
+                    estado_turno
+                )
+             VALUES (?, ?, 'mercado_pago', 'pendiente', 'pendiente_pago')`,
+            [usuarioId, servicioId]
+        );
+
+        return result;
+    }
+
+    static async guardarDatosMercadoPago(
+        turnoId,
+        preferenceId,
+        externalReference
+    ) {
+        const [result] = await db.query(
+            `UPDATE turnos
+             SET
+                mp_preference_id = ?,
+                mp_external_reference = ?
+             WHERE turnos_id = ?`,
+            [
+                preferenceId,
+                externalReference,
+                turnoId
+            ]
+        );
+
+        return result;
+    }
+
+    static async buscarPorId(turnoId) {
+        const [rows] = await db.query(
+            `SELECT
+                t.turnos_id,
+                t.usuarios_id,
+                t.servicios_id,
+                t.metodo_pago,
+                t.estado_pago,
+                t.estado_turno,
+                t.fecha_creacion,
+                t.mp_payment_id,
+                t.mp_preference_id,
+                t.mp_external_reference,
+                s.precio,
+                s.equipo,
+                s.falla,
+                u.telefono
+             FROM turnos t
+             INNER JOIN servicios s
+                ON s.servicios_id = t.servicios_id
+             INNER JOIN usuarios u
+                ON u.usuarios_id = t.usuarios_id
+             WHERE t.turnos_id = ?
+             LIMIT 1`,
+            [turnoId]
+        );
+
+        return rows[0] || null;
+    }
+
+    static async buscarPorExternalReference(externalReference) {
+        const [rows] = await db.query(
+            `SELECT
+                t.turnos_id,
+                t.usuarios_id,
+                t.servicios_id,
+                t.metodo_pago,
+                t.estado_pago,
+                t.estado_turno,
+                t.fecha_creacion,
+                t.mp_payment_id,
+                t.mp_preference_id,
+                t.mp_external_reference,
+                s.precio,
+                s.equipo,
+                s.falla,
+                u.telefono
+             FROM turnos t
+             INNER JOIN servicios s
+                ON s.servicios_id = t.servicios_id
+             INNER JOIN usuarios u
+                ON u.usuarios_id = t.usuarios_id
+             WHERE t.mp_external_reference = ?
+             LIMIT 1`,
+            [externalReference]
+        );
+
+        return rows[0] || null;
+    }
+
+    static async aprobarPagoMercadoPago(
+        turnoId,
+        paymentId
+    ) {
+        const connection = await db.getConnection();
+
+        try {
+            await connection.beginTransaction();
+
+            const [rows] = await connection.query(
+                `SELECT
+                    turnos_id,
+                    estado_pago,
+                    estado_turno
+                 FROM turnos
+                 WHERE turnos_id = ?
+                 FOR UPDATE`,
+                [turnoId]
+            );
+
+            if (rows.length === 0) {
+                throw new Error('TURN_NOT_FOUND');
+            }
+
+            const turno = rows[0];
+
+            // Idempotencia:
+            // si Mercado Pago manda el mismo webhook nuevamente,
+            // no volvemos a procesar el turno.
+            if (turno.estado_pago === 'aprobado') {
+                await connection.commit();
+
+                return {
+                    yaProcesado: true,
+                    estadoPago: turno.estado_pago,
+                    estadoTurno: turno.estado_turno
+                };
+            }
+
+            const [activos] = await connection.query(
+                `SELECT turnos_id
+                 FROM turnos
+                 WHERE estado_turno = 'en_progreso'
+                 LIMIT 1
+                 FOR UPDATE`
+            );
+
+            const nuevoEstadoTurno =
+                activos.length > 0
+                    ? 'en_lista_espera'
+                    : 'en_progreso';
+
+            await connection.query(
+                `UPDATE turnos
+                 SET
+                    estado_pago = 'aprobado',
+                    estado_turno = ?,
+                    mp_payment_id = ?
+                 WHERE turnos_id = ?`,
+                [
+                    nuevoEstadoTurno,
+                    String(paymentId),
+                    turnoId
+                ]
+            );
+
+            await connection.commit();
+
+            return {
+                yaProcesado: false,
+                estadoPago: 'aprobado',
+                estadoTurno: nuevoEstadoTurno
+            };
+
+        } catch (error) {
+            await connection.rollback();
+            throw error;
+        } finally {
+            connection.release();
+        }
+    }
+
+    static async marcarPagoRechazado(turnoId) {
+        const [result] = await db.query(
+            `UPDATE turnos
+             SET estado_pago = 'rechazado'
+             WHERE turnos_id = ?
+             AND estado_pago <> 'aprobado'`,
+            [turnoId]
+        );
+
+        return result;
+    }
+
+    static async marcarComoFinalizado(turnoId) {
+        const [result] = await db.query(
+            `UPDATE turnos
+             SET estado_turno = 'finalizado'
+             WHERE turnos_id = ?
+             AND estado_turno = 'en_progreso'`,
+            [turnoId]
+        );
+
+        return result;
+    }
+
+    static async obtenerSiguienteEnFila() {
+        const [rows] = await db.query(
+            `SELECT
+                t.turnos_id,
+                t.usuarios_id,
+                u.telefono,
+                s.equipo,
+                s.falla
+             FROM turnos t
+             INNER JOIN usuarios u
+                ON t.usuarios_id = u.usuarios_id
+             INNER JOIN servicios s
+                ON t.servicios_id = s.servicios_id
+             WHERE t.estado_turno = 'en_lista_espera'
+             AND t.estado_pago = 'aprobado'
+             ORDER BY t.fecha_creacion ASC
+             LIMIT 1`
+        );
+
+        return rows[0] || null;
+    }
+
+    static async activarTurnoPendiente(turnoId) {
+        const [result] = await db.query(
+            `UPDATE turnos
+             SET estado_turno = 'en_progreso'
+             WHERE turnos_id = ?
+             AND estado_turno = 'en_lista_espera'
+             AND estado_pago = 'aprobado'`,
+            [turnoId]
+        );
+
+        return result;
+    }
+}
+
+module.exports = TurnoModel;

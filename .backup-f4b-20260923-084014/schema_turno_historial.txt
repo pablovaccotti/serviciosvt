@@ -1,0 +1,12 @@
+CREATE TABLE `turno_historial` (
+  `historial_id` int(11) NOT NULL AUTO_INCREMENT,
+  `turnos_id` int(11) NOT NULL,
+  `usuarios_id` int(11) DEFAULT NULL,
+  `estado_anterior` varchar(50) DEFAULT NULL,
+  `estado_nuevo` varchar(50) NOT NULL,
+  `fecha` timestamp NOT NULL DEFAULT current_timestamp(),
+  `observacion` varchar(255) DEFAULT NULL,
+  PRIMARY KEY (`historial_id`),
+  KEY `idx_historial_turno_fecha` (`turnos_id`,`fecha`),
+  CONSTRAINT `fk_historial_turno` FOREIGN KEY (`turnos_id`) REFERENCES `turnos` (`turnos_id`)
+) ENGINE=InnoDB AUTO_INCREMENT=83 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci

@@ -1,0 +1,563 @@
+// models/agendaModel.js - F2 Agenda y capacidad (UNA cuadrilla = UN trabajo simultaneo)
+// Todas las operaciones mutantes son transaccionales con SELECT ... FOR UPDATE.
+// El solapamiento se valida DENTRO de la transaccion para impedir doble reserva.
+// Horarios: DATE + TIME como horario de pared local Argentina, sin conversion UTC.
+// estado_pago NUNCA se modifica desde este modulo.
+const db = require('../config/db');
+const TurnoHistorialModel = require('./turnoHistorialModel');
+
+const BLOQUES_ACTIVOS = ['reservado', 'en_progreso'];
+// F3A: pendiente_programacion es el estado programable principal.
+// pendiente_pago y en_lista_espera se conservan por compatibilidad F2.
+const TURNOS_PROGRAMABLES = ['pendiente_programacion', 'pendiente_pago', 'en_lista_espera'];
+const TURNOS_AGENDADOS = ['programado', 'reprogramado'];
+
+const errorConCodigo = (codigo, mensaje) => {
+    const error = new Error(mensaje || codigo);
+    error.code = codigo;
+    return error;
+};
+
+class AgendaModel {
+    static async programar(turnosId, cuadrillaId, fecha, horaInicio, horaFin, usuariosId) {
+        const connection = await db.getConnection();
+
+        try {
+            await connection.beginTransaction();
+
+            const [cuadrillas] = await connection.query(
+                `SELECT cuadrilla_id, activa
+                  FROM cuadrillas
+                  WHERE cuadrilla_id = ?
+                  FOR UPDATE`,
+                [cuadrillaId]
+            );
+
+            if (cuadrillas.length === 0) {
+                throw errorConCodigo('CUADRILLA_NO_EXISTE');
+            }
+
+            if (!cuadrillas[0].activa) {
+                throw errorConCodigo('CUADRILLA_INACTIVA');
+            }
+
+            const [turnos] = await connection.query(
+                `SELECT turnos_id, estado_turno
+                  FROM turnos
+                  WHERE turnos_id = ?
+                  FOR UPDATE`,
+                [turnosId]
+            );
+
+            if (turnos.length === 0) {
+                throw errorConCodigo('TURNO_NO_EXISTE');
+            }
+
+            if (!TURNOS_PROGRAMABLES.includes(turnos[0].estado_turno)) {
+                throw errorConCodigo('TURNO_NO_PROGRAMABLE');
+            }
+
+            const [bloquesDelTurno] = await connection.query(
+                `SELECT bloque_id
+                  FROM agenda_bloques
+                  WHERE turnos_id = ?
+                  AND estado IN (?, ?)
+                  LIMIT 1
+                  FOR UPDATE`,
+                [turnosId, BLOQUES_ACTIVOS[0], BLOQUES_ACTIVOS[1]]
+            );
+
+            if (bloquesDelTurno.length > 0) {
+                throw errorConCodigo('DOBLE_BLOQUE');
+            }
+
+            const [conflictos] = await connection.query(
+                `SELECT bloque_id
+                  FROM agenda_bloques
+                  WHERE cuadrilla_id = ?
+                  AND fecha = ?
+                  AND estado IN (?, ?)
+                  AND hora_inicio < ?
+                  AND hora_fin > ?
+                  LIMIT 1
+                  FOR UPDATE`,
+                [cuadrillaId, fecha, BLOQUES_ACTIVOS[0], BLOQUES_ACTIVOS[1], horaFin, horaInicio]
+            );
+
+            if (conflictos.length > 0) {
+                throw errorConCodigo('CONFLICTO_AGENDA');
+            }
+
+            await connection.query(
+                `UPDATE turnos
+                  SET estado_turno = 'programado'
+                  WHERE turnos_id = ?`,
+                [turnosId]
+            );
+
+            const [bloque] = await connection.query(
+                `INSERT INTO agenda_bloques
+                    (cuadrilla_id, turnos_id, fecha, hora_inicio, hora_fin, estado)
+                  VALUES (?, ?, ?, ?, ?, 'reservado')`,
+                [cuadrillaId, turnosId, fecha, horaInicio, horaFin]
+            );
+
+            await TurnoHistorialModel.registrar(
+                connection,
+                turnosId,
+                usuariosId,
+                turnos[0].estado_turno,
+                'programado',
+                `Programado ${fecha} ${horaInicio}-${horaFin} cuadrilla ${cuadrillaId}`
+            );
+
+            await connection.commit();
+
+            return { bloqueId: bloque.insertId };
+
+        } catch (error) {
+            await connection.rollback();
+            throw error;
+        } finally {
+            connection.release();
+        }
+    }
+
+    static async iniciar(turnosId, usuariosId) {
+        const connection = await db.getConnection();
+
+        try {
+            await connection.beginTransaction();
+
+            const [turnos] = await connection.query(
+                `SELECT turnos_id, estado_turno
+                  FROM turnos
+                  WHERE turnos_id = ?
+                  FOR UPDATE`,
+                [turnosId]
+            );
+
+            if (turnos.length === 0) {
+                throw errorConCodigo('TURNO_NO_EXISTE');
+            }
+
+            if (!TURNOS_AGENDADOS.includes(turnos[0].estado_turno)) {
+                throw errorConCodigo('TURNO_NO_INICIABLE');
+            }
+
+            const [bloques] = await connection.query(
+                `SELECT bloque_id, cuadrilla_id
+                  FROM agenda_bloques
+                  WHERE turnos_id = ?
+                  AND estado = 'reservado'
+                  LIMIT 1
+                  FOR UPDATE`,
+                [turnosId]
+            );
+
+            if (bloques.length === 0) {
+                throw errorConCodigo('BLOQUE_NO_RESERVADO');
+            }
+
+            const cuadrillaId = bloques[0].cuadrilla_id;
+
+            const [ocupados] = await connection.query(
+                `SELECT bloque_id
+                  FROM agenda_bloques
+                  WHERE cuadrilla_id = ?
+                  AND estado = 'en_progreso'
+                  LIMIT 1
+                  FOR UPDATE`,
+                [cuadrillaId]
+            );
+
+            if (ocupados.length > 0) {
+                throw errorConCodigo('CUADRILLA_OCUPADA');
+            }
+
+            await connection.query(
+                `UPDATE turnos
+                  SET estado_turno = 'en_progreso'
+                  WHERE turnos_id = ?`,
+                [turnosId]
+            );
+
+            await connection.query(
+                `UPDATE agenda_bloques
+                  SET estado = 'en_progreso',
+                      inicio_real = NOW()
+                  WHERE bloque_id = ?`,
+                [bloques[0].bloque_id]
+            );
+
+            await TurnoHistorialModel.registrar(
+                connection,
+                turnosId,
+                usuariosId,
+                turnos[0].estado_turno,
+                'en_progreso',
+                `Iniciado bloque ${bloques[0].bloque_id}`
+            );
+
+            await connection.commit();
+
+            return { bloqueId: bloques[0].bloque_id, cuadrillaId };
+
+        } catch (error) {
+            await connection.rollback();
+            throw error;
+        } finally {
+            connection.release();
+        }
+    }
+
+    static async finalizar(turnosId, usuariosId) {
+        const connection = await db.getConnection();
+
+        try {
+            await connection.beginTransaction();
+
+            const [turnos] = await connection.query(
+                `SELECT turnos_id, estado_turno
+                  FROM turnos
+                  WHERE turnos_id = ?
+                  FOR UPDATE`,
+                [turnosId]
+            );
+
+            if (turnos.length === 0) {
+                throw errorConCodigo('TURNO_NO_EXISTE');
+            }
+
+            // Idempotencia: ya finalizado con bloque liberado.
+            if (turnos[0].estado_turno === 'finalizado') {
+                const [liberados] = await connection.query(
+                    `SELECT bloque_id, inicio_real, fin_real, duracion_real_min
+                      FROM agenda_bloques
+                      WHERE turnos_id = ?
+                      AND estado = 'liberado'
+                      ORDER BY bloque_id DESC
+                      LIMIT 1
+                      FOR UPDATE`,
+                    [turnosId]
+                );
+
+                await connection.commit();
+
+                const previo = liberados[0] || {};
+
+                return {
+                    yaFinalizado: true,
+                    bloqueId: previo.bloque_id || null,
+                    inicioReal: previo.inicio_real || null,
+                    finReal: previo.fin_real || null,
+                    duracionMin: previo.duracion_real_min ?? null
+                };
+            }
+
+            if (turnos[0].estado_turno !== 'en_progreso') {
+                throw errorConCodigo('FINALIZACION_INVALIDA');
+            }
+
+            const [bloques] = await connection.query(
+                `SELECT bloque_id, inicio_real
+                  FROM agenda_bloques
+                  WHERE turnos_id = ?
+                  AND estado = 'en_progreso'
+                  LIMIT 1
+                  FOR UPDATE`,
+                [turnosId]
+            );
+
+            if (bloques.length === 0) {
+                throw errorConCodigo('FINALIZACION_INVALIDA');
+            }
+
+            await connection.query(
+                `UPDATE turnos
+                  SET estado_turno = 'finalizado'
+                  WHERE turnos_id = ?`,
+                [turnosId]
+            );
+
+            await connection.query(
+                `UPDATE agenda_bloques
+                  SET estado = 'liberado',
+                      fin_real = NOW(),
+                      duracion_real_min = TIMESTAMPDIFF(MINUTE, inicio_real, NOW())
+                  WHERE bloque_id = ?`,
+                [bloques[0].bloque_id]
+            );
+
+            await TurnoHistorialModel.registrar(
+                connection,
+                turnosId,
+                usuariosId,
+                'en_progreso',
+                'finalizado',
+                `Finalizado bloque ${bloques[0].bloque_id}`
+            );
+
+            const [cerrado] = await connection.query(
+                `SELECT bloque_id, inicio_real, fin_real, duracion_real_min
+                  FROM agenda_bloques
+                  WHERE bloque_id = ?`,
+                [bloques[0].bloque_id]
+            );
+
+            await connection.commit();
+
+            return {
+                yaFinalizado: false,
+                bloqueId: cerrado[0].bloque_id,
+                inicioReal: cerrado[0].inicio_real,
+                finReal: cerrado[0].fin_real,
+                duracionMin: cerrado[0].duracion_real_min
+            };
+
+        } catch (error) {
+            await connection.rollback();
+            throw error;
+        } finally {
+            connection.release();
+        }
+    }
+
+    static async cancelar(turnosId, usuariosId, motivo) {
+        const connection = await db.getConnection();
+
+        try {
+            await connection.beginTransaction();
+
+            const [turnos] = await connection.query(
+                `SELECT turnos_id, estado_turno
+                  FROM turnos
+                  WHERE turnos_id = ?
+                  FOR UPDATE`,
+                [turnosId]
+            );
+
+            if (turnos.length === 0) {
+                throw errorConCodigo('TURNO_NO_EXISTE');
+            }
+
+            if (!TURNOS_AGENDADOS.includes(turnos[0].estado_turno)) {
+                throw errorConCodigo('CANCELACION_INVALIDA');
+            }
+
+            const [bloques] = await connection.query(
+                `SELECT bloque_id, cuadrilla_id
+                  FROM agenda_bloques
+                  WHERE turnos_id = ?
+                  AND estado = 'reservado'
+                  LIMIT 1
+                  FOR UPDATE`,
+                [turnosId]
+            );
+
+            if (bloques.length === 0) {
+                throw errorConCodigo('CANCELACION_INVALIDA');
+            }
+
+            await connection.query(
+                `UPDATE turnos
+                  SET estado_turno = 'cancelado'
+                  WHERE turnos_id = ?`,
+                [turnosId]
+            );
+
+            await connection.query(
+                `UPDATE agenda_bloques
+                  SET estado = 'cancelado'
+                  WHERE bloque_id = ?`,
+                [bloques[0].bloque_id]
+            );
+
+            await TurnoHistorialModel.registrar(
+                connection,
+                turnosId,
+                usuariosId,
+                turnos[0].estado_turno,
+                'cancelado',
+                motivo ? String(motivo).substring(0, 255) : `Cancelado bloque ${bloques[0].bloque_id}`
+            );
+
+            await connection.commit();
+
+            return { bloqueId: bloques[0].bloque_id };
+
+        } catch (error) {
+            await connection.rollback();
+            throw error;
+        } finally {
+            connection.release();
+        }
+    }
+
+    static async reprogramar(turnosId, cuadrillaId, fecha, horaInicio, horaFin, usuariosId) {
+        const connection = await db.getConnection();
+
+        try {
+            await connection.beginTransaction();
+
+            const [turnos] = await connection.query(
+                `SELECT turnos_id, estado_turno
+                  FROM turnos
+                  WHERE turnos_id = ?
+                  FOR UPDATE`,
+                [turnosId]
+            );
+
+            if (turnos.length === 0) {
+                throw errorConCodigo('TURNO_NO_EXISTE');
+            }
+
+            if (!TURNOS_AGENDADOS.includes(turnos[0].estado_turno)) {
+                throw errorConCodigo('REPROGRAMACION_INVALIDA');
+            }
+
+            const [bloques] = await connection.query(
+                `SELECT bloque_id, cuadrilla_id, fecha, hora_inicio, hora_fin
+                  FROM agenda_bloques
+                  WHERE turnos_id = ?
+                  AND estado = 'reservado'
+                  LIMIT 1
+                  FOR UPDATE`,
+                [turnosId]
+            );
+
+            if (bloques.length === 0) {
+                throw errorConCodigo('REPROGRAMACION_INVALIDA');
+            }
+
+            const cuadrillaDestino = cuadrillaId || bloques[0].cuadrilla_id;
+
+            const [cuadrillas] = await connection.query(
+                `SELECT cuadrilla_id, activa
+                  FROM cuadrillas
+                  WHERE cuadrilla_id = ?
+                  FOR UPDATE`,
+                [cuadrillaDestino]
+            );
+
+            if (cuadrillas.length === 0) {
+                throw errorConCodigo('CUADRILLA_NO_EXISTE');
+            }
+
+            if (!cuadrillas[0].activa) {
+                throw errorConCodigo('CUADRILLA_INACTIVA');
+            }
+
+            const [conflictos] = await connection.query(
+                `SELECT bloque_id
+                  FROM agenda_bloques
+                  WHERE cuadrilla_id = ?
+                  AND fecha = ?
+                  AND estado IN (?, ?)
+                  AND hora_inicio < ?
+                  AND hora_fin > ?
+                  AND bloque_id <> ?
+                  LIMIT 1
+                  FOR UPDATE`,
+                [cuadrillaDestino, fecha, BLOQUES_ACTIVOS[0], BLOQUES_ACTIVOS[1], horaFin, horaInicio, bloques[0].bloque_id]
+            );
+
+            if (conflictos.length > 0) {
+                throw errorConCodigo('CONFLICTO_AGENDA');
+            }
+
+            await connection.query(
+                `UPDATE agenda_bloques
+                  SET estado = 'cancelado'
+                  WHERE bloque_id = ?`,
+                [bloques[0].bloque_id]
+            );
+
+            const [nuevo] = await connection.query(
+                `INSERT INTO agenda_bloques
+                    (cuadrilla_id, turnos_id, fecha, hora_inicio, hora_fin, estado)
+                  VALUES (?, ?, ?, ?, ?, 'reservado')`,
+                [cuadrillaDestino, turnosId, fecha, horaInicio, horaFin]
+            );
+
+            await connection.query(
+                `UPDATE turnos
+                  SET estado_turno = 'reprogramado'
+                  WHERE turnos_id = ?`,
+                [turnosId]
+            );
+
+            await TurnoHistorialModel.registrar(
+                connection,
+                turnosId,
+                usuariosId,
+                turnos[0].estado_turno,
+                'reprogramado',
+                `De ${bloques[0].fecha} ${bloques[0].hora_inicio}-${bloques[0].hora_fin} a ${fecha} ${horaInicio}-${horaFin}`
+            );
+
+            await connection.commit();
+
+            return { bloqueAnteriorId: bloques[0].bloque_id, bloqueId: nuevo.insertId };
+
+        } catch (error) {
+            await connection.rollback();
+            throw error;
+        } finally {
+            connection.release();
+        }
+    }
+
+    static async obtenerActual(cuadrillaId) {
+        const [rows] = await db.query(
+            `SELECT b.bloque_id, b.cuadrilla_id, b.turnos_id, b.fecha, b.hora_inicio, b.hora_fin,
+                    b.estado AS estado_bloque, b.inicio_real,
+                    t.estado_turno, t.estado_pago, t.metodo_pago,
+                    u.telefono, s.equipo, s.falla, s.precio
+              FROM agenda_bloques b
+              INNER JOIN turnos t ON t.turnos_id = b.turnos_id
+              INNER JOIN usuarios u ON u.usuarios_id = t.usuarios_id
+              INNER JOIN servicios s ON s.servicios_id = t.servicios_id
+              WHERE b.cuadrilla_id = ?
+              AND b.estado = 'en_progreso'
+              LIMIT 1`,
+            [cuadrillaId]
+        );
+
+        return rows[0] || null;
+    }
+
+    static async obtenerProximos(cuadrillaId, fecha, limite) {
+        const parametros = [cuadrillaId];
+        let filtroFecha = '';
+
+        if (fecha) {
+            filtroFecha = 'AND b.fecha = ?';
+            parametros.push(fecha);
+        }
+
+        parametros.push(limite);
+
+        const [rows] = await db.query(
+            `SELECT b.bloque_id, b.cuadrilla_id, b.turnos_id, b.fecha, b.hora_inicio, b.hora_fin,
+                    b.estado AS estado_bloque,
+                    t.estado_turno, t.estado_pago, t.metodo_pago,
+                    u.telefono, s.equipo, s.falla, s.precio
+              FROM agenda_bloques b
+              INNER JOIN turnos t ON t.turnos_id = b.turnos_id
+              INNER JOIN usuarios u ON u.usuarios_id = t.usuarios_id
+              INNER JOIN servicios s ON s.servicios_id = t.servicios_id
+              WHERE b.cuadrilla_id = ?
+              AND b.estado = 'reservado'
+              AND t.estado_turno IN ('programado', 'reprogramado')
+              ${filtroFecha}
+              ORDER BY b.fecha ASC, b.hora_inicio ASC
+              LIMIT ?`,
+            parametros
+        );
+
+        return rows;
+    }
+}
+
+module.exports = AgendaModel;

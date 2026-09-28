@@ -1,0 +1,10 @@
+{
+  "usuarios": 10,
+  "tecnicos": 2,
+  "cuadrillas": 1,
+  "cuadrilla_tecnicos": 2,
+  "servicios": 5,
+  "turnos": 0,
+  "agenda_bloques": 0,
+  "turno_historial": 0
+}

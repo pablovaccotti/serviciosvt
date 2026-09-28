@@ -1,0 +1,120 @@
+// init-backend.js - Ejecutá este archivo para crear todo el sistema automáticamente
+const fs = require('fs');
+const path = require('path');
+
+const carpetas = [
+    'config',
+    'models',
+    'controllers',
+    'routes',
+    'middlewares'
+];
+
+const archivos = {
+    'config/db.js': `const mysql = require('mysql2');
+const pool = mysql.createPool({
+    host: 'localhost',
+    user: 'root',
+    password: 'tu_password',
+    database: 'servicevt_db',
+    waitForConnections: true,
+    connectionLimit: 10
+});
+module.exports = pool.promise();`,
+
+    'models/serviceModel.js': `const db = require('../config/db');
+class ServiceModel {
+    static async getAll() {
+        const [rows] = await db.query("SELECT * FROM servicios");
+        return rows;
+    }
+    static async getByEquipmentAndIssue(equipo, falla) {
+        const [rows] = await db.query("SELECT precio, garantia FROM servicios WHERE equipo = ? AND falla = ?", [equipo, falla]);
+        return rows[0];
+    }
+}
+module.exports = ServiceModel;`,
+
+    'controllers/serviceController.js': `const ServiceModel = require('../models/serviceModel');
+const getServices = async (req, res) => {
+    try {
+        const services = await ServiceModel.getAll();
+        res.status(200).json(services);
+    } catch (error) {
+        res.status(500).json({ error: 'Error en la base de datos.' });
+    }
+};
+module.exports = { getServices };`,
+
+    'controllers/chatController.js': `const ServiceModel = require('../models/serviceModel');
+const handleChat = async (req, res) => {
+    const { mensaje, equipoSeleccionado, fallaSeleccionada } = req.body;
+    try {
+        const servicio = await ServiceModel.getByEquipmentAndIssue(equipoSeleccionado, fallaSeleccionada);
+        let contextoPrecio = "No encontramos tarifas exactas.";
+        if (servicio) {
+            contextoPrecio = \`El precio actual en sistema es de \$\${servicio.precio} ARS con garantía de \$\${servicio.garantia}.\`;
+        }
+        const promptConContexto = \`[CONTEXTO] \${contextoPrecio} [CLIENTE] \${mensaje}\`;
+        const response = await fetch('http://localhost:11434/api/generate', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ model: 'servicevt-bot', prompt: promptConContexto, stream: false })
+        });
+        const data = await response.json();
+        res.status(200).json({ respuesta: data.response });
+    } catch (error) {
+        res.status(500).json({ error: 'Error con Ollama.' });
+    }
+};
+module.exports = { handleChat };`,
+
+    'routes/serviceRoutes.js': `const express = require('express');
+const router = express.Router();
+const { getServices } = require('../controllers/serviceController');
+router.get('/', getServices);
+module.exports = router;`,
+
+    'routes/chatRoutes.js': `const express = require('express');
+const router = express.Router();
+const { handleChat } = require('../controllers/chatController');
+router.post('/', handleChat);
+module.exports = router;`,
+
+    'middlewares/authMiddleware.js': `const verificarAdmin = (req, res, next) => {
+    next();
+};
+module.exports = { verificarAdmin };`,
+
+    'app.js': `const express = require('express');
+const cors = require('cors');
+const serviceRoutes = require('./routes/serviceRoutes');
+const chatRoutes = require('./routes/chatRoutes');
+const app = express();
+app.use(cors());
+app.use(express.json());
+app.use('/api/servicios', serviceRoutes);
+app.use('/api/chat', chatRoutes);
+module.exports = app;`,
+
+    'server.js': `const app = require('./app');
+const PORT = process.env.PORT || 3000;
+app.listen(PORT, () => {
+    console.log(\`[serviceVT] Servidor corriendo en el puerto \${PORT}\`);
+});`
+};
+
+// Crear directorios
+carpetas.forEach(dir => {
+    const dirPath = path.join(__dirname, dir);
+    if (!fs.existsSync(dirPath)) {
+        fs.mkdirSync(dirPath);
+    }
+});
+
+// Crear archivos con su respectivo código incorporado
+Object.keys(archivos).forEach(filePath => {
+    fs.writeFileSync(path.join(__dirname, filePath), archivos[filePath].trim());
+});
+
+console.log("¡Estructura profesional de serviceVT creada con éxito por el Agente!");

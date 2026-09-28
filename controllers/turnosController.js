@@ -1,0 +1,345 @@
+// controllers/turnosController.js - F2 Agenda (solo admin en F2)
+// Valida entrada, autentica via middleware, delega transacciones a AgendaModel.
+// estado_pago nunca se modifica desde este controlador.
+const AgendaModel = require('../models/agendaModel');
+const CuadrillaModel = require('../models/cuadrillaModel');
+const TurnoHistorialModel = require('../models/turnoHistorialModel');
+
+const DURACION_MINIMA_MIN = 15;
+const DURACION_MAXIMA_MIN = 720;
+
+const esEnteroPositivo = (valor) => {
+    const numero = Number(valor);
+    return Number.isInteger(numero) && numero > 0;
+};
+
+const esFechaValida = (fecha) => {
+    if (typeof fecha !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(fecha)) {
+        return false;
+    }
+
+    const [anio, mes, dia] = fecha.split('-').map(Number);
+    const dt = new Date(Date.UTC(anio, mes - 1, dia));
+
+    return dt.getUTCFullYear() === anio &&
+        dt.getUTCMonth() === mes - 1 &&
+        dt.getUTCDate() === dia;
+};
+
+// Fecha de hoy en America/Argentina/Buenos_Aires (pared local, sin cambiar TZ global).
+const hoyArgentina = () => new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'America/Argentina/Buenos_Aires',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit'
+}).format(new Date());
+
+const esHoraValida = (hora) => typeof hora === 'string' && /^([01]\d|2[0-3]):([0-5]\d)$/.test(hora);
+
+const minutosEntre = (inicio, fin) => {
+    const [hi, mi] = inicio.split(':').map(Number);
+    const [hf, mf] = fin.split(':').map(Number);
+    return (hf * 60 + mf) - (hi * 60 + mi);
+};
+
+const validarSlot = (res, fecha, horaInicio, horaFin) => {
+    if (!esFechaValida(fecha)) {
+        res.status(400).json({ error: 'La fecha no es válida (YYYY-MM-DD).' });
+        return false;
+    }
+
+    if (fecha < hoyArgentina()) {
+        res.status(400).json({ error: 'La fecha no puede ser pasada.' });
+        return false;
+    }
+
+    if (!esHoraValida(horaInicio) || !esHoraValida(horaFin)) {
+        res.status(400).json({ error: 'El horario no es válido (HH:MM).' });
+        return false;
+    }
+
+    if (horaFin <= horaInicio) {
+        res.status(400).json({ error: 'La hora de fin debe ser posterior a la de inicio.' });
+        return false;
+    }
+
+    const duracion = minutosEntre(horaInicio, horaFin);
+
+    if (duracion < DURACION_MINIMA_MIN || duracion > DURACION_MAXIMA_MIN) {
+        res.status(400).json({ error: 'La duración del bloque no es razonable.' });
+        return false;
+    }
+
+    return true;
+};
+
+const MAPA_ERRORES = {
+    TURNO_NO_EXISTE: 404,
+    CUADRILLA_NO_EXISTE: 404,
+    CUADRILLA_INACTIVA: 409,
+    TURNO_NO_PROGRAMABLE: 409,
+    DOBLE_BLOQUE: 409,
+    CONFLICTO_AGENDA: 409,
+    TURNO_NO_INICIABLE: 409,
+    BLOQUE_NO_RESERVADO: 409,
+    CUADRILLA_OCUPADA: 409,
+    FINALIZACION_INVALIDA: 409,
+    CANCELACION_INVALIDA: 409,
+    REPROGRAMACION_INVALIDA: 409
+};
+
+const MENSAJES_ERROR = {
+    TURNO_NO_EXISTE: 'El turno no existe.',
+    CUADRILLA_NO_EXISTE: 'La cuadrilla no existe.',
+    CUADRILLA_INACTIVA: 'La cuadrilla no está activa.',
+    TURNO_NO_PROGRAMABLE: 'El turno no está en un estado programable.',
+    DOBLE_BLOQUE: 'El turno ya tiene un bloque activo.',
+    CONFLICTO_AGENDA: 'La cuadrilla ya tiene un trabajo en ese horario.',
+    TURNO_NO_INICIABLE: 'El turno no está programado.',
+    BLOQUE_NO_RESERVADO: 'El turno no tiene un bloque reservado.',
+    CUADRILLA_OCUPADA: 'La cuadrilla ya tiene un trabajo en progreso.',
+    FINALIZACION_INVALIDA: 'El turno no está en progreso.',
+    CANCELACION_INVALIDA: 'El turno no está programado.',
+    REPROGRAMACION_INVALIDA: 'El turno no está programado.'
+};
+
+const responderErrorAgenda = (res, error) => {
+    if (error && error.code && MAPA_ERRORES[error.code]) {
+        return res.status(MAPA_ERRORES[error.code]).json({
+            error: MENSAJES_ERROR[error.code]
+        });
+    }
+
+    console.error('[TURNOS] Error:', error);
+
+    return res.status(500).json({
+        error: 'Error interno de agenda.'
+    });
+};
+
+const programar = async (req, res) => {
+    const turnosId = Number(req.body?.turnosId);
+    const cuadrillaId = Number(req.body?.cuadrillaId);
+    const fecha = req.body?.fecha;
+    const horaInicio = req.body?.horaInicio;
+    const horaFin = req.body?.horaFin;
+
+    if (!esEnteroPositivo(turnosId)) {
+        return res.status(400).json({ error: 'El ID del turno no es válido.' });
+    }
+
+    if (!esEnteroPositivo(cuadrillaId)) {
+        return res.status(400).json({ error: 'La cuadrilla no es válida.' });
+    }
+
+    if (!validarSlot(res, fecha, horaInicio, horaFin)) {
+        return;
+    }
+
+    try {
+        const resultado = await AgendaModel.programar(
+            turnosId, cuadrillaId, fecha, horaInicio, horaFin, req.user?.usuariosId
+        );
+
+        return res.status(201).json({
+            message: 'Trabajo programado correctamente.',
+            bloqueId: resultado.bloqueId
+        });
+    } catch (error) {
+        return responderErrorAgenda(res, error);
+    }
+};
+
+const iniciar = async (req, res) => {
+    const turnosId = Number(req.body?.turnosId);
+
+    if (!esEnteroPositivo(turnosId)) {
+        return res.status(400).json({ error: 'El ID del turno no es válido.' });
+    }
+
+    try {
+        const resultado = await AgendaModel.iniciar(turnosId, req.user?.usuariosId);
+
+        return res.status(200).json({
+            message: 'Trabajo iniciado correctamente.',
+            bloqueId: resultado.bloqueId,
+            cuadrillaId: resultado.cuadrillaId
+        });
+    } catch (error) {
+        return responderErrorAgenda(res, error);
+    }
+};
+
+const finalizar = async (req, res) => {
+    const turnosId = Number(req.body?.turnosId);
+
+    if (!esEnteroPositivo(turnosId)) {
+        return res.status(400).json({ error: 'El ID del turno no es válido.' });
+    }
+
+    try {
+        const resultado = await AgendaModel.finalizar(turnosId, req.user?.usuariosId);
+
+        return res.status(200).json({
+            message: resultado.yaFinalizado
+                ? 'El trabajo ya estaba finalizado.'
+                : 'Trabajo finalizado correctamente.',
+            yaFinalizado: resultado.yaFinalizado,
+            bloqueId: resultado.bloqueId,
+            inicioReal: resultado.inicioReal,
+            finReal: resultado.finReal,
+            duracionMin: resultado.duracionMin
+        });
+    } catch (error) {
+        return responderErrorAgenda(res, error);
+    }
+};
+
+const cancelar = async (req, res) => {
+    const turnosId = Number(req.body?.turnosId);
+    const motivo = typeof req.body?.motivo === 'string' ? req.body.motivo.trim().substring(0, 255) : null;
+
+    if (!esEnteroPositivo(turnosId)) {
+        return res.status(400).json({ error: 'El ID del turno no es válido.' });
+    }
+
+    try {
+        const resultado = await AgendaModel.cancelar(turnosId, req.user?.usuariosId, motivo);
+
+        return res.status(200).json({
+            message: 'Trabajo cancelado correctamente.',
+            bloqueId: resultado.bloqueId
+        });
+    } catch (error) {
+        return responderErrorAgenda(res, error);
+    }
+};
+
+const reprogramar = async (req, res) => {
+    const turnosId = Number(req.body?.turnosId);
+    const cuadrillaId = req.body?.cuadrillaId === undefined || req.body?.cuadrillaId === null
+        ? null
+        : Number(req.body.cuadrillaId);
+    const fecha = req.body?.fecha;
+    const horaInicio = req.body?.horaInicio;
+    const horaFin = req.body?.horaFin;
+
+    if (!esEnteroPositivo(turnosId)) {
+        return res.status(400).json({ error: 'El ID del turno no es válido.' });
+    }
+
+    if (cuadrillaId !== null && !esEnteroPositivo(cuadrillaId)) {
+        return res.status(400).json({ error: 'La cuadrilla no es válida.' });
+    }
+
+    if (!validarSlot(res, fecha, horaInicio, horaFin)) {
+        return;
+    }
+
+    try {
+        const resultado = await AgendaModel.reprogramar(
+            turnosId, cuadrillaId, fecha, horaInicio, horaFin, req.user?.usuariosId
+        );
+
+        return res.status(200).json({
+            message: 'Trabajo reprogramado correctamente.',
+            bloqueAnteriorId: resultado.bloqueAnteriorId,
+            bloqueId: resultado.bloqueId
+        });
+    } catch (error) {
+        return responderErrorAgenda(res, error);
+    }
+};
+
+const actual = async (req, res) => {
+    const cuadrillaId = Number(req.query?.cuadrillaId);
+
+    if (!esEnteroPositivo(cuadrillaId)) {
+        return res.status(400).json({ error: 'La cuadrilla no es válida.' });
+    }
+
+    try {
+        const trabajo = await AgendaModel.obtenerActual(cuadrillaId);
+
+        return res.status(200).json({ trabajo });
+    } catch (error) {
+        return responderErrorAgenda(res, error);
+    }
+};
+
+const proximos = async (req, res) => {
+    const cuadrillaId = Number(req.query?.cuadrillaId);
+    const fecha = req.query?.fecha;
+    const limite = req.query?.limite === undefined ? 20 : Number(req.query.limite);
+
+    if (!esEnteroPositivo(cuadrillaId)) {
+        return res.status(400).json({ error: 'La cuadrilla no es válida.' });
+    }
+
+    if (fecha !== undefined && !esFechaValida(fecha)) {
+        return res.status(400).json({ error: 'La fecha no es válida (YYYY-MM-DD).' });
+    }
+
+    if (!Number.isInteger(limite) || limite < 1 || limite > 50) {
+        return res.status(400).json({ error: 'El límite no es válido.' });
+    }
+
+    try {
+        const trabajos = await AgendaModel.obtenerProximos(cuadrillaId, fecha, limite);
+
+        return res.status(200).json({ trabajos });
+    } catch (error) {
+        return responderErrorAgenda(res, error);
+    }
+};
+
+const cuadrillas = async (req, res) => {
+    try {
+        const lista = await CuadrillaModel.listar();
+
+        return res.status(200).json({ cuadrillas: lista });
+    } catch (error) {
+        return responderErrorAgenda(res, error);
+    }
+};
+
+// F5: turnos pendientes de programacion (solo lectura, admin).
+// No recibe parametros, no modifica la base de datos.
+const pendientes = async (req, res) => {
+    try {
+        const turnos = await AgendaModel.obtenerPendientes();
+
+        return res.status(200).json({ turnos });
+    } catch (error) {
+        return responderErrorAgenda(res, error);
+    }
+};
+
+const historial = async (req, res) => {
+    const turnosId = Number(req.query?.turnosId);
+
+    if (!esEnteroPositivo(turnosId)) {
+        return res.status(400).json({ error: 'El ID del turno no es válido.' });
+    }
+
+    try {
+        const movimientos = await TurnoHistorialModel.listarPorTurno(turnosId);
+
+        return res.status(200).json({ historial: movimientos });
+    } catch (error) {
+        return responderErrorAgenda(res, error);
+    }
+};
+
+module.exports = {
+    programar,
+    iniciar,
+    finalizar,
+    cancelar,
+    reprogramar,
+    actual,
+    proximos,
+    pendientes,
+    cuadrillas,
+    historial
+};

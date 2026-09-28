@@ -1,0 +1,1464 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+
+    <title>serviceVT - Servicio Técnico</title>
+
+    <style>
+        * {
+            box-sizing: border-box;
+        }
+
+        body {
+            margin: 0;
+            min-height: 100vh;
+            font-family: Arial, Helvetica, sans-serif;
+            background: #f1f5f9;
+            color: #1e293b;
+        }
+
+        .container {
+            width: min(900px, 94%);
+            margin: 30px auto;
+        }
+
+        .card {
+            background: white;
+            border-radius: 18px;
+            padding: 28px;
+            box-shadow: 0 8px 30px rgba(15, 23, 42, 0.08);
+            margin-bottom: 20px;
+        }
+
+        h1 {
+            margin-top: 0;
+            text-align: center;
+            color: #0f172a;
+        }
+
+        .subtitle {
+            text-align: center;
+            color: #64748b;
+            margin-bottom: 28px;
+        }
+
+        label {
+            display: block;
+            margin-top: 16px;
+            margin-bottom: 7px;
+            font-weight: bold;
+        }
+
+        select,
+        textarea,
+        input {
+            width: 100%;
+            border: 1px solid #cbd5e1;
+            border-radius: 10px;
+            padding: 12px;
+            font-size: 16px;
+            background: white;
+        }
+
+        textarea {
+            min-height: 80px;
+            resize: vertical;
+        }
+
+        button {
+            border: 0;
+            border-radius: 10px;
+            padding: 12px 18px;
+            font-size: 15px;
+            font-weight: bold;
+            cursor: pointer;
+        }
+
+        button:disabled {
+            opacity: 0.55;
+            cursor: not-allowed;
+        }
+
+        .btn-primary {
+            width: 100%;
+            margin-top: 20px;
+            background: #0f172a;
+            color: white;
+        }
+
+        .btn-primary:hover:not(:disabled) {
+            background: #1e293b;
+        }
+
+        .btn-secondary {
+            background: #e2e8f0;
+            color: #0f172a;
+        }
+
+        .btn-whatsapp {
+            background: #16a34a;
+            color: white;
+        }
+
+        /* F6-C: enlace de derivación con apariencia de botón. */
+        a.btn-whatsapp {
+            display: block;
+            text-align: center;
+            text-decoration: none;
+            border-radius: 10px;
+            padding: 12px 18px;
+            font-size: 15px;
+            font-weight: bold;
+            margin-top: 12px;
+        }
+
+        .btn-mp {
+            background: #2563eb;
+            color: white;
+        }
+
+        .result {
+            display: none;
+            margin-top: 24px;
+            border-top: 1px solid #e2e8f0;
+            padding-top: 24px;
+        }
+
+        .price-box {
+            background: #f8fafc;
+            border: 1px solid #e2e8f0;
+            border-radius: 12px;
+            padding: 18px;
+            margin-bottom: 20px;
+        }
+
+        .price {
+            font-size: 28px;
+            font-weight: bold;
+            margin: 8px 0;
+            color: #0f172a;
+        }
+
+        .actions {
+            display: flex;
+            gap: 10px;
+            flex-wrap: wrap;
+            margin-top: 16px;
+        }
+
+        .actions button {
+            flex: 1;
+            min-width: 180px;
+        }
+
+        .chat {
+            display: none;
+        }
+
+        .chat-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            gap: 15px;
+            margin-bottom: 15px;
+        }
+
+        .chat-header h2 {
+            margin: 0;
+        }
+
+        .chat-status {
+            font-size: 13px;
+            color: #64748b;
+        }
+
+        .chat-messages {
+            height: 420px;
+            overflow-y: auto;
+            padding: 16px;
+            background: #f8fafc;
+            border: 1px solid #e2e8f0;
+            border-radius: 14px;
+        }
+
+        .message {
+            display: flex;
+            margin-bottom: 12px;
+        }
+
+        .message-content {
+            max-width: 82%;
+            padding: 11px 14px;
+            border-radius: 14px;
+            line-height: 1.45;
+            white-space: pre-wrap;
+            word-break: break-word;
+        }
+
+        .message.assistant {
+            justify-content: flex-start;
+        }
+
+        .message.assistant .message-content {
+            background: #e2e8f0;
+            color: #0f172a;
+            border-bottom-left-radius: 4px;
+        }
+
+        .message.user {
+            justify-content: flex-end;
+        }
+
+        .message.user .message-content {
+            background: #0f172a;
+            color: white;
+            border-bottom-right-radius: 4px;
+        }
+
+        .chat-input {
+            display: flex;
+            gap: 10px;
+            margin-top: 12px;
+            align-items: flex-end;
+        }
+
+        .chat-input textarea {
+            flex: 1;
+            min-height: 52px;
+            max-height: 160px;
+        }
+
+        .chat-input button {
+            height: 52px;
+            background: #0f172a;
+            color: white;
+        }
+
+        .typing {
+            color: #64748b;
+            font-style: italic;
+            padding: 5px;
+        }
+
+        .info {
+            display: none;
+            margin-top: 15px;
+            padding: 12px;
+            border-radius: 10px;
+            background: #eff6ff;
+            color: #1e40af;
+        }
+
+        .error {
+            display: none;
+            margin-top: 15px;
+            padding: 12px;
+            border-radius: 10px;
+            background: #fef2f2;
+            color: #991b1b;
+        }
+
+        .diagnostic {
+            display: none;
+            margin-top: 20px;
+            padding: 18px;
+            border-radius: 12px;
+            background: #f0fdf4;
+            border: 1px solid #bbf7d0;
+        }
+
+        .small {
+            font-size: 13px;
+            color: #64748b;
+        }
+
+        @media (max-width: 650px) {
+            .card {
+                padding: 18px;
+            }
+
+            .chat-messages {
+                height: 360px;
+            }
+
+            .chat-input {
+                flex-direction: column;
+                align-items: stretch;
+            }
+
+            .chat-input button {
+                width: 100%;
+            }
+        }
+    </style>
+</head>
+
+<body>
+
+<div class="container">
+
+    <div class="card">
+        <h1>serviceVT 🔧</h1>
+
+        <p class="subtitle">
+            Cotizá tu reparación y consultá con nuestro asistente técnico.
+        </p>
+
+        <form id="quoteForm">
+
+            <label for="electro">
+                1. ¿Qué equipo es?
+            </label>
+
+            <select id="electro" required>
+                <option value="">Seleccioná...</option>
+            </select>
+
+            <label for="falla">
+                2. ¿Cuál es la falla?
+            </label>
+
+            <select id="falla" required disabled>
+                <option value="">
+                    Primero elegí el equipo...
+                </option>
+            </select>
+
+            <button
+                id="btnIniciar"
+                class="btn-primary"
+                type="button"
+                disabled
+            >
+                Iniciar diagnóstico
+            </button>
+
+        </form>
+
+        <div id="errorBox" class="error"></div>
+        <div id="infoBox" class="info"></div>
+
+        <div id="resultado" class="result">
+
+            <div class="price-box">
+
+                <strong>Servicio seleccionado</strong>
+
+                <div id="servicioDescripcion"></div>
+
+                <div class="price" id="precioServicio">
+                    $0
+                </div>
+
+                <div id="garantiaServicio"></div>
+
+                <div class="small">
+                    Este es el precio actualmente registrado
+                    en ServiceVT para el servicio seleccionado.
+                </div>
+
+                <div class="actions">
+
+                    <button
+                        id="btnWhatsApp"
+                        class="btn-whatsapp"
+                        type="button"
+                    >
+                        Solicitar por WhatsApp
+                    </button>
+
+                    <button
+                        id="btnMercadoPago"
+                        class="btn-mp"
+                        type="button"
+                    >
+                        Pagar con Mercado Pago
+                    </button>
+
+                </div>
+
+            </div>
+
+        </div>
+    </div>
+
+
+    <div id="chatCard" class="card chat">
+
+        <div class="chat-header">
+
+            <div>
+                <h2>🤖 Asistente ServiceVT</h2>
+
+                <div class="chat-status" id="chatStatus">
+                    Diagnóstico inicial
+                </div>
+            </div>
+
+            <button
+                id="btnNuevoChat"
+                class="btn-secondary"
+                type="button"
+            >
+                Nuevo chat
+            </button>
+
+        </div>
+
+        <div
+            id="chatMessages"
+            class="chat-messages"
+        ></div>
+
+        <div
+            id="typing"
+            class="typing"
+            style="display:none;"
+        >
+            El asistente está pensando...
+        </div>
+
+        <div class="chat-input">
+
+            <textarea
+                id="chatInput"
+                placeholder="Escribí tu respuesta..."
+                maxlength="1000"
+            ></textarea>
+
+            <button
+                id="btnEnviar"
+                type="button"
+            >
+                Enviar
+            </button>
+
+        </div>
+
+        <div
+            id="diagnosticResult"
+            class="diagnostic"
+        >
+        </div>
+
+    </div>
+
+</div>
+
+
+<script>
+    'use strict';
+
+    /*
+     * Al servir index.html desde Express usamos una URL relativa.
+     * Esto evita depender de localhost:3000 en producción.
+     */
+    const API_URL = '/api';
+
+    let serviciosDB = [];
+    let historialChat = [];
+
+    let servicioSeleccionado = null;
+    let chatActivo = false;
+    let enviandoMensaje = false;
+
+
+    /*
+     * ---------------------------------------------------------
+     * UTILIDADES
+     * ---------------------------------------------------------
+     */
+
+    function mostrarError(mensaje) {
+        const box = document.getElementById('errorBox');
+
+        box.textContent = mensaje;
+        box.style.display = 'block';
+    }
+
+
+    function ocultarError() {
+        const box = document.getElementById('errorBox');
+
+        box.textContent = '';
+        box.style.display = 'none';
+    }
+
+
+    function mostrarInfo(mensaje) {
+        const box = document.getElementById('infoBox');
+
+        box.textContent = mensaje;
+        box.style.display = 'block';
+    }
+
+
+    function ocultarInfo() {
+        const box = document.getElementById('infoBox');
+
+        box.textContent = '';
+        box.style.display = 'none';
+    }
+
+
+    function obtenerToken() {
+        return localStorage.getItem('serviceVT_token');
+    }
+
+
+    function guardarSesion(data) {
+        if (!data) {
+            return;
+        }
+
+        const token =
+            data.token ||
+            data.accessToken ||
+            data.jwt;
+
+        if (token) {
+            localStorage.setItem(
+                'serviceVT_token',
+                token
+            );
+        }
+    }
+
+
+    function obtenerHeadersAutenticados() {
+        const token = obtenerToken();
+
+        const headers = {
+            'Content-Type': 'application/json'
+        };
+
+        if (token) {
+            headers.Authorization = `Bearer ${token}`;
+        }
+
+        return headers;
+    }
+
+
+    function agregarMensaje(rol, contenido) {
+        const container =
+            document.getElementById('chatMessages');
+
+        const wrapper =
+            document.createElement('div');
+
+        wrapper.className =
+            `message ${rol === 'usuario' ? 'user' : 'assistant'}`;
+
+        const bubble =
+            document.createElement('div');
+
+        bubble.className = 'message-content';
+
+        bubble.textContent = contenido;
+
+        wrapper.appendChild(bubble);
+        container.appendChild(wrapper);
+
+        container.scrollTop =
+            container.scrollHeight;
+    }
+
+
+    function limpiarChatVisual() {
+        const container =
+            document.getElementById('chatMessages');
+
+        container.replaceChildren();
+
+        const resultado =
+            document.getElementById('diagnosticResult');
+
+        resultado.replaceChildren();
+        delete resultado.dataset.handoff;
+    }
+
+
+    function mostrarPensando(mostrar) {
+        document.getElementById('typing').style.display =
+            mostrar ? 'block' : 'none';
+    }
+
+
+    /*
+     * F6-C: panel de derivación a WhatsApp al cierre del flujo corto.
+     * Solo se muestra una vez por diagnóstico; la URL viene del backend.
+     */
+    function mostrarDerivacionWhatsApp(url) {
+        const resultado =
+            document.getElementById('diagnosticResult');
+
+        if (resultado.dataset.handoff === '1') {
+            return;
+        }
+
+        resultado.dataset.handoff = '1';
+        resultado.replaceChildren();
+        resultado.style.display = 'block';
+
+        const texto =
+            document.createElement('p');
+
+        texto.textContent =
+            'Con lo que me contaste ya puedo orientar el caso. ' +
+            'Seguimos por WhatsApp para coordinar la visita.';
+
+        const enlace =
+            document.createElement('a');
+
+        enlace.href = url;
+        enlace.target = '_blank';
+        enlace.rel = 'noopener';
+        enlace.className = 'btn-whatsapp';
+        enlace.textContent = '💬 Continuar por WhatsApp';
+
+        resultado.appendChild(texto);
+        resultado.appendChild(enlace);
+    }
+
+
+    function actualizarBotonEnviar() {
+        const btn =
+            document.getElementById('btnEnviar');
+
+        const input =
+            document.getElementById('chatInput');
+
+        btn.disabled =
+            enviandoMensaje ||
+            !input.value.trim() ||
+            !chatActivo;
+    }
+
+
+    /*
+     * ---------------------------------------------------------
+     * CARGA DE SERVICIOS
+     * ---------------------------------------------------------
+     */
+
+    async function cargarDatos() {
+        try {
+            ocultarError();
+
+            const response =
+                await fetch(`${API_URL}/servicios`);
+
+            if (!response.ok) {
+                throw new Error(
+                    `HTTP ${response.status}`
+                );
+            }
+
+            const data =
+                await response.json();
+
+            serviciosDB =
+                Array.isArray(data)
+                    ? data
+                    : (data.servicios || []);
+            serviciosDB = serviciosDB.filter(servicio =>
+                                        servicio &&
+                                        servicio.equipo &&
+                                        servicio.falla
+                                    );
+
+                                    console.log(
+                                        '[SERVICEVT] Servicios cargados:',
+                                        serviciosDB
+                                    );
+            const selectEquipo =
+                document.getElementById('electro');
+
+            selectEquipo.replaceChildren();
+
+            const primeraOpcion =
+                document.createElement('option');
+
+            primeraOpcion.value = '';
+            primeraOpcion.textContent =
+                'Seleccioná...';
+
+            selectEquipo.appendChild(
+                primeraOpcion
+            );
+
+            const equipos =
+                [...new Set(
+                    serviciosDB
+                        .map(servicio => servicio.equipo)
+                        .filter(Boolean)
+                )];
+
+            equipos.forEach(equipo => {
+
+                const option =
+                    document.createElement('option');
+
+                option.value = equipo;
+                option.textContent = equipo;
+
+                selectEquipo.appendChild(option);
+            });
+
+        } catch (error) {
+
+            console.error(
+                '[FRONTEND] Error cargando servicios:',
+                error
+            );
+
+            mostrarError(
+                'No se pudieron cargar los servicios. ' +
+                'Verificá que el servidor esté funcionando.'
+            );
+        }
+    }
+
+
+    /*
+     * ---------------------------------------------------------
+     * SELECCIÓN DE EQUIPO
+     * ---------------------------------------------------------
+     */
+
+   document
+    .getElementById('electro')
+    .addEventListener('change', function () {
+
+        const equipoSeleccionado =
+            String(this.value || '').trim();
+
+        const selectFalla =
+            document.getElementById('falla');
+
+        const btnIniciar =
+            document.getElementById('btnIniciar');
+
+        selectFalla.replaceChildren();
+
+        servicioSeleccionado = null;
+
+        document
+            .getElementById('resultado')
+            .style.display = 'none';
+
+        document
+            .getElementById('chatCard')
+            .style.display = 'none';
+
+        historialChat = [];
+        chatActivo = false;
+
+        const opcionInicial =
+            document.createElement('option');
+
+        opcionInicial.value = '';
+
+        if (!equipoSeleccionado) {
+
+            opcionInicial.textContent =
+                'Primero elegí el equipo...';
+
+            selectFalla.appendChild(
+                opcionInicial
+            );
+
+            selectFalla.disabled = true;
+            btnIniciar.disabled = true;
+
+            return;
+        }
+
+        opcionInicial.textContent =
+            'Seleccioná la falla...';
+
+        selectFalla.appendChild(
+            opcionInicial
+        );
+
+        const fallas =
+            serviciosDB.filter(servicio => {
+
+                const equipoDB =
+                    String(servicio.equipo || '').trim();
+
+                return equipoDB === equipoSeleccionado;
+            });
+
+        console.log(
+            '[SERVICEVT] Equipo seleccionado:',
+            equipoSeleccionado
+        );
+
+        console.log(
+            '[SERVICEVT] Servicios encontrados:',
+            fallas
+        );
+
+        fallas.forEach(servicio => {
+
+            const option =
+                document.createElement('option');
+
+            option.value =
+                String(servicio.falla || '').trim();
+
+            option.textContent =
+                String(servicio.falla || '').trim();
+
+            selectFalla.appendChild(option);
+        });
+
+        selectFalla.disabled =
+            fallas.length === 0;
+
+        btnIniciar.disabled = true;
+
+        if (fallas.length === 0) {
+            mostrarError(
+                'No encontramos fallas registradas para este equipo.'
+            );
+        } else {
+            ocultarError();
+        }
+    });
+    /*
+     * ---------------------------------------------------------
+     * SELECCIÓN DE FALLA
+     * ---------------------------------------------------------
+     */
+
+    document
+        .getElementById('falla')
+        .addEventListener('change', function () {
+
+            const equipo =
+                document.getElementById('electro').value;
+
+            const falla =
+                this.value;
+
+            const btnIniciar =
+                document.getElementById('btnIniciar');
+
+            servicioSeleccionado =
+                serviciosDB.find(servicio =>
+                    servicio.equipo === equipo &&
+                    servicio.falla === falla
+                ) || null;
+
+            btnIniciar.disabled =
+                !servicioSeleccionado;
+
+            if (servicioSeleccionado) {
+                mostrarServicio(
+                    servicioSeleccionado
+                );
+            }
+        });
+
+
+    /*
+     * ---------------------------------------------------------
+     * MOSTRAR SERVICIO
+     * ---------------------------------------------------------
+     */
+
+    function mostrarServicio(servicio) {
+
+        const resultado =
+            document.getElementById('resultado');
+
+        document
+            .getElementById('servicioDescripcion')
+            .textContent =
+                `${servicio.equipo} — ${servicio.falla}`;
+
+        document
+            .getElementById('precioServicio')
+            .textContent =
+                `$${Number(servicio.precio).toLocaleString('es-AR')} ARS`;
+
+        document
+            .getElementById('garantiaServicio')
+            .textContent =
+                `Garantía: ${servicio.garantia}`;
+
+        resultado.style.display = 'block';
+    }
+
+
+    /*
+     * ---------------------------------------------------------
+     * CHAT
+     * ---------------------------------------------------------
+     */
+
+    async function iniciarDiagnostico() {
+
+        if (!servicioSeleccionado) {
+            return;
+        }
+
+        ocultarError();
+        ocultarInfo();
+
+        historialChat = [];
+        chatActivo = true;
+
+        limpiarChatVisual();
+
+        const chatCard =
+            document.getElementById('chatCard');
+
+        chatCard.style.display = 'block';
+
+        document
+            .getElementById('chatStatus')
+            .textContent =
+                `${servicioSeleccionado.equipo} — ` +
+                `${servicioSeleccionado.falla}`;
+
+        document
+    /*
+    
+     * ---------------------------------------------------------
+     * CHAT
+     * ---------------------------------------------------------
+     */
+            .getElementById('diagnosticResult')
+            .style.display = 'none';
+
+        document
+            .getElementById('diagnosticResult')
+            .textContent = '';
+
+        /*
+         * Primer mensaje técnico.
+         * No fingimos que el cliente escribió algo.
+         * Es una solicitud inicial de diagnóstico.
+         */
+        await enviarMensajeAlBackend(
+            'Quiero diagnosticar esta falla.'
+        );
+
+        document
+            .getElementById('chatInput')
+            .focus();
+    }
+
+
+    async function enviarMensaje() {
+
+        const input =
+            document.getElementById('chatInput');
+
+        const mensaje =
+            input.value.trim();
+
+        if (!mensaje || enviandoMensaje || !chatActivo) {
+            return;
+        }
+
+        input.value = '';
+
+        actualizarBotonEnviar();
+
+        agregarMensaje(
+            'usuario',
+            mensaje
+        );
+
+        historialChat.push({
+            rol: 'usuario',
+            contenido: mensaje
+        });
+
+        await enviarMensajeAlBackend(
+            mensaje,
+            true
+        );
+    }
+
+
+    async function enviarMensajeAlBackend(
+        mensaje,
+        mensajeYaMostrado = false
+    ) {
+
+        if (!servicioSeleccionado) {
+            return;
+        }
+
+        enviandoMensaje = true;
+        actualizarBotonEnviar();
+
+        mostrarPensando(true);
+
+        try {
+
+            /*
+             * Enviamos el historial anterior.
+             *
+             * Si el mensaje ya fue agregado al historial,
+             * sacamos temporalmente el último para no duplicarlo,
+             * porque "mensaje" viaja separado.
+             */
+            let historialParaBackend =
+                [...historialChat];
+
+            if (
+                mensajeYaMostrado &&
+                historialParaBackend.length > 0
+            ) {
+                historialParaBackend =
+                    historialParaBackend.slice(
+                        0,
+                        -1
+                    );
+            }
+            console.log('[CHAT-FRONT] Enviando solicitud a /api/chat...');
+            console.time('[CHAT-FRONT] Tiempo total');
+            const response =
+                    
+                await fetch(
+                    
+                    `${API_URL}/chat`,
+                    {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type':
+                                'application/json'
+                        },
+                        body: JSON.stringify({
+                            mensaje,
+
+                            equipoSeleccionado:
+                                servicioSeleccionado.equipo,
+
+                            fallaSeleccionada:
+                                servicioSeleccionado.falla,
+
+                            historial:
+                                historialParaBackend
+                        })
+                        
+                    }
+                    
+                );
+            console.timeEnd('[CHAT-FRONT] Tiempo total');
+            console.log('[CHAT-FRONT] HTTP:', response.status);    
+
+            let data = {};
+
+            try {
+                data =
+                    await response.json();
+            } catch {
+                data = {};
+            }
+
+            if (!response.ok) {
+                throw new Error(
+                    data.error ||
+                    `Error HTTP ${response.status}`
+                );
+            }
+
+            const respuesta =
+                typeof data.respuesta === 'string'
+                    ? data.respuesta.trim()
+                    : '';
+
+            if (!respuesta) {
+                throw new Error(
+                    'El asistente no devolvió una respuesta.'
+                );
+            }
+
+            agregarMensaje(
+                'asistente',
+                respuesta
+            );
+
+            historialChat.push({
+                rol: 'asistente',
+                contenido: respuesta
+/*******  eba36019-d273-4214-b2fd-2ebe5cf26032  *******/
+            });
+
+            /*
+             * Si el backend devolvió datos oficiales,
+             * actualizamos el precio/garantía mostrado.
+             */
+            if (
+                data.precio !== null &&
+                data.precio !== undefined
+            ) {
+                document
+                    .getElementById('precioServicio')
+                    .textContent =
+                        `$${Number(data.precio)
+                            .toLocaleString('es-AR')} ARS`;
+            }
+
+            if (data.garantia) {
+                document
+                    .getElementById('garantiaServicio')
+                    .textContent =
+                        `Garantía: ${data.garantia}`;
+            }
+
+            /*
+             * F6-C: cierre del flujo corto.
+             * El backend indica listo=true con la URL de WhatsApp
+             * (armada con WHATSAPP_NUMBER del servidor; el número
+             * nunca se hardcodea acá). Se muestra una sola vez.
+             */
+            if (
+                data.listo === true &&
+                typeof data.whatsappUrl === 'string' &&
+                data.whatsappUrl.length > 0
+            ) {
+                mostrarDerivacionWhatsApp(data.whatsappUrl);
+            }
+
+        } catch (error) {
+
+            
+            console.error(
+                '[CHAT] Error:',
+                error
+            );
+
+            mostrarError(
+                error.message ||
+                'No se pudo comunicar con el asistente.'
+            );
+
+            /*
+             * Si el backend falló, dejamos el mensaje
+             * del usuario en historial. Así no perdemos
+             * lo que escribió.
+             */
+
+        } finally {
+
+            enviandoMensaje = false;
+
+            mostrarPensando(false);
+
+            actualizarBotonEnviar();
+
+            document
+                .getElementById('chatInput')
+                .focus();
+        }
+    }
+
+
+    /*
+     * ---------------------------------------------------------
+     * NUEVO CHAT
+     * ---------------------------------------------------------
+     */
+
+    function nuevoChat() {
+
+        if (!servicioSeleccionado) {
+            return;
+        }
+
+        historialChat = [];
+
+        chatActivo = true;
+
+        limpiarChatVisual();
+
+        document
+            .getElementById('diagnosticResult')
+            .style.display = 'none';
+
+        ocultarError();
+
+        enviarMensajeAlBackend(
+            'Quiero comenzar nuevamente el diagnóstico.'
+        );
+    }
+
+
+    /*
+     * ---------------------------------------------------------
+     * AUTENTICACIÓN
+     * ---------------------------------------------------------
+     */
+
+    async function autenticarCliente() {
+
+        const tokenExistente =
+            obtenerToken();
+
+        if (tokenExistente) {
+            return true;
+        }
+
+        const telefono =
+            prompt(
+                'Ingresá tu número de teléfono para continuar:'
+            );
+
+        if (!telefono) {
+            return false;
+        }
+
+        try {
+
+            const response =
+                await fetch(
+                    `${API_URL}/auth/login-rapido`,
+                    {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type':
+                                'application/json'
+                        },
+                        body: JSON.stringify({
+                            telefono: telefono.trim()
+                        })
+                    }
+                );
+
+            const data =
+                await response.json();
+
+            if (!response.ok) {
+                throw new Error(
+                    data.error ||
+                    'No se pudo iniciar la sesión.'
+                );
+            }
+
+            guardarSesion(data);
+
+            if (!obtenerToken()) {
+                throw new Error(
+                    'El servidor no devolvió un token de sesión.'
+                );
+            }
+
+            return true;
+
+        } catch (error) {
+
+            console.error(
+                '[AUTH] Error:',
+                error
+            );
+
+            mostrarError(
+                error.message ||
+                'No se pudo iniciar sesión.'
+            );
+
+            return false;
+        }
+    }
+
+
+    /*
+     * ---------------------------------------------------------
+     * CONTRATAR SERVICIO
+     * ---------------------------------------------------------
+     */
+
+    async function contratarServicio(
+        metodoPago
+    ) {
+
+        if (!servicioSeleccionado) {
+            mostrarError(
+                'Primero seleccioná un servicio.'
+            );
+            return;
+        }
+
+        ocultarError();
+
+        const autenticado =
+            await autenticarCliente();
+
+        if (!autenticado) {
+            return;
+        }
+
+        try {
+
+            mostrarInfo(
+                'Procesando la solicitud...'
+            );
+
+            const response =
+                await fetch(
+                    `${API_URL}/pagos/solicitar`,
+                    {
+                        method: 'POST',
+                        headers:
+                            obtenerHeadersAutenticados(),
+                        body: JSON.stringify({
+                            idServicio:
+                                servicioSeleccionado.servicios_id,
+
+                            metodoPago
+                        })
+                    }
+                );
+
+            const data =
+                await response.json();
+
+            if (!response.ok) {
+                throw new Error(
+                    data.error ||
+                    'No se pudo solicitar el servicio.'
+                );
+            }
+
+            /*
+             * Mercado Pago y WhatsApp actualmente
+             * devuelven una URL.
+             */
+            if (data.url) {
+                window.location.href =
+                    data.url;
+
+                return;
+            }
+
+            throw new Error(
+                'El servidor no devolvió una URL de continuación.'
+            );
+
+        } catch (error) {
+
+            console.error(
+                '[PAGO] Error:',
+                error
+            );
+
+            ocultarInfo();
+
+            mostrarError(
+                error.message ||
+                'No se pudo procesar la solicitud.'
+            );
+        }
+    }
+
+
+    /*
+     * ---------------------------------------------------------
+     * EVENTOS
+     * ---------------------------------------------------------
+     */
+
+    document
+        .getElementById('btnIniciar')
+        .addEventListener(
+            'click',
+            iniciarDiagnostico
+        );
+
+
+    document
+        .getElementById('btnEnviar')
+        .addEventListener(
+            'click',
+            enviarMensaje
+        );
+
+
+    document
+        .getElementById('btnNuevoChat')
+        .addEventListener(
+            'click',
+            nuevoChat
+        );
+
+
+    document
+        .getElementById('btnWhatsApp')
+        .addEventListener(
+            'click',
+            () => contratarServicio(
+                'efectivo_whatsapp'
+            )
+        );
+
+
+    document
+        .getElementById('btnMercadoPago')
+        .addEventListener(
+            'click',
+            () => contratarServicio(
+                'mercado_pago'
+            )
+        );
+
+
+    document
+        .getElementById('chatInput')
+        .addEventListener(
+            'input',
+            actualizarBotonEnviar
+        );
+
+
+    document
+        .getElementById('chatInput')
+        .addEventListener(
+            'keydown',
+            function(event) {
+
+                /*
+                 * Enter = enviar.
+                 * Shift + Enter = nueva línea.
+                 */
+                if (
+                    event.key === 'Enter' &&
+                    !event.shiftKey
+                ) {
+                    event.preventDefault();
+
+                    if (!enviandoMensaje) {
+                        enviarMensaje();
+                    }
+                }
+            }
+        );
+
+
+    /*
+     * ---------------------------------------------------------
+     * INICIO
+     * ---------------------------------------------------------
+     */
+
+    window.addEventListener(
+        'DOMContentLoaded',
+        () => {
+            cargarDatos();
+            actualizarBotonEnviar();
+        }
+    );
+</script>
+
+</body>
+</html>

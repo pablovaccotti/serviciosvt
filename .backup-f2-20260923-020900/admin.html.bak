@@ -1,0 +1,229 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Panel de Administración - serviceVT</title>
+    <style>
+        body { font-family: 'Segoe UI', Arial, sans-serif; background-color: #f1f5f9; margin: 0; padding: 20px; }
+        .admin-container { max-width: 950px; margin: 0 auto; }
+        h1 { color: #1e3a8a; border-bottom: 3px solid #2563eb; padding-bottom: 10px; }
+        .card { background: white; padding: 20px; border-radius: 10px; box-shadow: 0 4px 6px rgba(0,0,0,0.05); margin-bottom: 25px; }
+        h2 { color: #334155; margin-top: 0; font-size: 1.2rem; }
+        .form-group { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 15px; margin-bottom: 15px; }
+        input, select { padding: 10px; border: 1px solid #cbd5e1; border-radius: 6px; font-size: 14px; }
+        button { background-color: #2563eb; color: white; border: none; padding: 10px 15px; border-radius: 6px; font-weight: bold; cursor: pointer; transition: 0.2s; }
+        button:hover { background-color: #1d4ed8; }
+        table { width: 100%; border-collapse: collapse; margin-top: 15px; background: white; }
+        th, td { padding: 12px; text-align: left; border-bottom: 1px solid #e2e8f0; }
+        th { background-color: #f8fafc; color: #64748b; font-weight: 600; }
+        .btn-edit { background-color: #059669; font-size: 13px; padding: 6px 12px; }
+        .btn-edit:hover { background-color: #047857; }
+        .btn-finalizar { background-color: #dc2626; font-size: 13px; padding: 6px 12px; }
+        .btn-finalizar:hover { background-color: #b91c1c; }
+        .input-precio-tabla { width: 90px; padding: 5px; }
+    </style>
+</head>
+<body>
+
+<div class="admin-container">
+    <h1>Panel Técnico serviceVT ⚙️</h1>
+
+    <!-- FORMULARIO PARA AGREGAR NUEVA FALLA -->
+    <div class="card">
+        <h2>➕ Agregar Nueva Falla / Tarifa</h2>
+        <form id="addForm">
+            <div class="form-group">
+                <select id="newEquipo" required>
+                    <option value="">Seleccioná Equipo...</option>
+                    <option value="Aire Acondicionado">Aire Acondicionado</option>
+                    <option value="Heladera">Heladera</option>
+                    <option value="Lavarropas">Lavarropas</option>
+                </select>
+                <input type="text" id="newFalla" placeholder="Descripción de la falla" required>
+                <input type="number" id="newPrecio" placeholder="Precio ARS" required>
+                <input type="text" id="newGarantia" placeholder="Garantía" required>
+                <button type="submit">Guardar Falla</button>
+            </div>
+        </form>
+    </div>
+
+    <!-- TABLA DE PRECIOS ACTUALES -->
+    <div class="card">
+        <h2>📋 Listado de Tarifas en MySQL</h2>
+        <table id="tablaServicios">
+            <thead>
+                <tr>
+                    <th>Equipo</th>
+                    <th>Falla / Servicio</th>
+                    <th>Garantía</th>
+                    <th>Precio Actual</th>
+                    <th>Acción</th>
+                </tr>
+            </thead>
+            <tbody></tbody>
+        </table>
+    </div>
+
+    <!-- CONTROL DE AGENDA / TURNOS ACTIVOS -->
+    <div class="card" style="border-top: 4px solid #dc2626;">
+        <h2>🛠️ Trabajos Técnicos en Progreso (Liberar Citas)</h2>
+        <p style="color:#64748b; font-size:14px;">Ingresá el ID del Turno que acabás de finalizar para liberar el espacio de la agenda y despachar automáticamente la notificación al próximo cliente en la fila.</p>
+        <div style="display:flex; gap:15px;">
+            <input type="number" id="turnoIdFinalizar" placeholder="ID del Turno (ej: 1)" style="max-width:200px;">
+            <button class="btn-finalizar" onclick="liberarAgendaTecnica()">Finalizar Trabajo y Notificar Próximo</button>
+        </div>
+    </div>
+</div>
+
+<script>
+    const API_BASE = window.location.origin;
+    const API_URL = `${API_BASE}/api/servicios`;
+    const PAGOS_URL = `${API_BASE}/api/pagos`;
+
+    function getAdminHeaders() {
+        const token = localStorage.getItem('serviceVT_token');
+        return {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${token || ''}`
+        };
+    }
+
+    function exigirSesionAdmin() {
+        const token = localStorage.getItem('serviceVT_token');
+        if (!token) {
+            alert('Falta sesión de administrador. Iniciá sesión antes de operar.');
+            return false;
+        }
+        return true;
+    }
+
+    // 1. Cargar los datos usando servicios_id (Corregido)
+    async function cargarTabla() {
+        try {
+            const res = await fetch(API_URL);
+            const servicios = await res.json();
+            const tbody = document.querySelector('#tablaServicios tbody');
+            tbody.innerHTML = '';
+
+            servicios.forEach(s => {
+                const serviciosId = Number(s.servicios_id);
+                if (!Number.isInteger(serviciosId) || serviciosId <= 0) {
+                    return;
+                }
+
+                const tr = document.createElement('tr');
+
+                const tdEquipo = document.createElement('td');
+                const strongEquipo = document.createElement('strong');
+                strongEquipo.textContent = String(s.equipo ?? '');
+                tdEquipo.appendChild(strongEquipo);
+
+                const tdFalla = document.createElement('td');
+                tdFalla.textContent = String(s.falla ?? '');
+
+                const tdGarantia = document.createElement('td');
+                const spanGarantia = document.createElement('span');
+                spanGarantia.style.color = '#64748b';
+                spanGarantia.textContent = String(s.garantia ?? '');
+                tdGarantia.appendChild(spanGarantia);
+
+                const tdPrecio = document.createElement('td');
+                tdPrecio.appendChild(document.createTextNode('$ '));
+                const inputPrecio = document.createElement('input');
+                inputPrecio.type = 'number';
+                inputPrecio.className = 'input-precio-tabla';
+                inputPrecio.id = `precio-${serviciosId}`;
+                inputPrecio.value = String(s.precio ?? '');
+                tdPrecio.appendChild(inputPrecio);
+
+                const tdAccion = document.createElement('td');
+                const btnEdit = document.createElement('button');
+                btnEdit.className = 'btn-edit';
+                btnEdit.textContent = 'Actualizar';
+                btnEdit.addEventListener('click', () => actualizarPrecio(serviciosId));
+                tdAccion.appendChild(btnEdit);
+
+                tr.appendChild(tdEquipo);
+                tr.appendChild(tdFalla);
+                tr.appendChild(tdGarantia);
+                tr.appendChild(tdPrecio);
+                tr.appendChild(tdAccion);
+                tbody.appendChild(tr);
+            });
+        } catch (error) { alert('Error al conectar con el servidor backend.'); }
+    }
+
+    // 2. Actualizar precio (solo admin)
+    async function actualizarPrecio(id) {
+        if (!exigirSesionAdmin()) {
+            return;
+        }
+
+        const nuevoPrecio = document.getElementById(`precio-${id}`).value;
+        try {
+            const res = await fetch(`${API_URL}/update-price`, {
+                method: 'PUT',
+                headers: getAdminHeaders(),
+                body: JSON.stringify({ id, precio: Number(nuevoPrecio) })
+            });
+            const data = await res.json();
+            alert(data.message || data.error || 'Precio modificado.');
+            cargarTabla();
+        } catch (e) { alert('No se pudo actualizar el precio.'); }
+    }
+
+    // 3. Insertar nueva falla (solo admin)
+    document.getElementById('addForm').addEventListener('submit', async (e) => {
+        e.preventDefault();
+        if (!exigirSesionAdmin()) {
+            return;
+        }
+
+        const equipo = document.getElementById('newEquipo').value;
+        const falla = document.getElementById('newFalla').value;
+        const precio = document.getElementById('newPrecio').value;
+        const garantia = document.getElementById('newGarantia').value;
+
+        try {
+            const res = await fetch(`${API_URL}/add`, {
+                method: 'POST',
+                headers: getAdminHeaders(),
+                body: JSON.stringify({ equipo, falla, precio: Number(precio), garantia })
+            });
+            const data = await res.json().catch(() => ({}));
+            if(res.ok) {
+                alert('¡Falla guardada con éxito en MySQL!');
+                document.getElementById('addForm').reset();
+                cargarTabla();
+            } else {
+                alert(data.error || 'No se pudo guardar la falla.');
+            }
+        } catch (err) { alert('Error al guardar la nueva falla.'); }
+    });
+
+    // 4. NUEVO: Función para liberar turnos en cola
+    async function liberarAgendaTecnica() {
+        if (!exigirSesionAdmin()) {
+            return;
+        }
+
+        const turnoId = Number(document.getElementById('turnoIdFinalizar').value);
+        if(!Number.isInteger(turnoId) || turnoId <= 0) return alert("Por favor, ingresá el ID de un turno activo.");
+
+        try {
+            const res = await fetch(`${PAGOS_URL}/finalizar-trabajo`, {
+                method: 'POST',
+                headers: getAdminHeaders(),
+                body: JSON.stringify({ turnoId })
+            });
+            const data = await res.json();
+            alert(data.message || data.error || 'Respuesta del servidor.');
+            document.getElementById('turnoIdFinalizar').value = '';
+        } catch (e) { alert("Error al conectar con el liberador de turnos."); }
+    }
+
+    window.onload = cargarTabla;
+</script>
+</body>
+</html>
