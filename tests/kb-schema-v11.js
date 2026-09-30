@@ -49,7 +49,7 @@ try {
     assert.strictEqual(validacion.ok, true, `lavarropas v1.1 válido: ${validacion.errores.join(' ')}`);
     assert.strictEqual(lavarropas.equipo, 'Lavarropas', 'equipo');
     assert.strictEqual(lavarropas.problema, 'No centrifuga', 'problema');
-    assert.strictEqual(lavarropas.datos_observables.length, 7, '7 datos');
+    assert.strictEqual(lavarropas.datos_observables.length, 8, '8 datos');
     assert.strictEqual(lavarropas.causas.length, 6, '6 causas');
     ok('B-lavarropas-v11-valida');
 
@@ -117,7 +117,7 @@ try {
     assert.strictEqual(pasoH.pregunta.clave, 'luz_interior', 'primera pregunta intacta');
     const pasoL = motor.paso(lavarropas, {});
     assert.strictEqual(pasoL.tipo, 'pregunta', 'lavarropas pregunta al inicio');
-    assert.strictEqual(pasoL.pregunta.clave, 'queda_agua_tambor', 'pregunta más discriminante primera');
+    assert.strictEqual(pasoL.pregunta.clave, 'tambor_gira_lavado', 'pregunta más discriminante primera');
     ok('J-motor-seleccion-intacta');
 
     console.log(`\nKB-SCHEMA-TESTS-OK:${pasados}`);

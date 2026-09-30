@@ -61,7 +61,13 @@
       "pregunta": "¿Hace un ruido raro o fuerte cuando intenta centrifugar?",
       "objetivo": "El ruido anormal es compatible con transmisión/mecánica antes que con electrónica.",
       "tipo": "booleano",
-      "sinonimos": ["ruido raro", "golpeteo", "ruido fuerte", "traqueteo", "hace ruido"]}
+      "sinonimos": ["ruido raro", "golpeteo", "ruido fuerte", "traqueteo", "hace ruido"]},
+    {
+      "clave": "tambor_intenta_centrifugar",
+      "pregunta": "¿Cuando debería comenzar el centrifugado, el tambor intenta girar o queda completamente quieto?",
+      "objetivo": "Permite distinguir entre un equipo que intenta iniciar el centrifugado y uno que no presenta intento de movimiento.",
+      "tipo": "booleano",
+      "sinonimos": ["intenta girar", "quiere arrancar", "amaga", "queda quieto", "no se mueve", "ni se mueve", "quieto"]}
   ],
   "causas": [
     {
@@ -82,12 +88,6 @@
           "efecto": "disminuye",
           "peso": 1,
           "motivo": "Con carga distribuida se reduce la plausibilidad del desbalanceo."
-        },
-        {
-          "cuando": {"queda_agua_tambor": true},
-          "efecto": "disminuye",
-          "peso": 1,
-          "motivo": "Con agua sin desagotar, la prioridad pasa al desagote antes que al desbalanceo."
         }
       ],
       "servicios_ids": [],
@@ -103,7 +103,7 @@
     {
       "id": "problema_desagote",
       "nombre": "Desagote obstruido (filtro/bomba)",
-      "descripcion": "El equipo no centrifuga con agua retenida: filtro de bomba o desagote obstruidos.",
+      "descripcion": "Agua retenida compatible con una falla de desagote, filtro, manguera o bomba, a confirmar en domicilio.",
       "nivel_base": "media",
       "aplica_variantes": ["carga_frontal", "carga_superior"],
       "evidencia": [
@@ -135,7 +135,7 @@
       "nombre": "Blocapuertas / traba de puerta",
       "descripcion": "Sin traba habilitada el equipo no inicia el centrifugado por seguridad.",
       "nivel_base": "media",
-      "aplica_variantes": ["carga_frontal", "carga_superior"],
+      "aplica_variantes": ["carga_frontal"],
       "evidencia": [
         {
           "cuando": {"puerta_no_traba": true},
@@ -168,22 +168,16 @@
       "aplica_variantes": ["carga_frontal", "carga_superior"],
       "evidencia": [
         {
-          "cuando": {"motor_zumba": true},
-          "efecto": "aumenta",
-          "peso": 1,
-          "motivo": "Motor que intenta moverse con tambor detenido es compatible con transmisión."
-        },
-        {
           "cuando": {"ruido_anormal": true},
           "efecto": "aumenta",
           "peso": 1,
-          "motivo": "El ruido anormal es compatible con falla mecánica de transmisión."
+          "motivo": "El ruido anormal durante el intento de centrifugado es compatible con una anomalía mecánica o de transmisión."
         },
         {
           "cuando": {"tambor_gira_lavado": true},
           "efecto": "disminuye",
           "peso": 1,
-          "motivo": "Si el tambor es arrastrado en lavado, la transmisión total no está cortada."
+          "motivo": "Si la transmisión logra arrastrar el tambor durante otra etapa, se reduce la plausibilidad de un corte total, sin descartar una falla de correa."
         }
       ],
       "servicios_ids": [],
@@ -207,13 +201,13 @@
           "cuando": {"motor_zumba": true},
           "efecto": "aumenta",
           "peso": 1,
-          "motivo": "El zumbido sin arranque es compatible con motor/capacitor."
+          "motivo": "Un zumbido o intento de arranque sin movimiento es compatible con una dificultad de arranque del motor/capacitor en modelos que utilizan capacitor."
         },
         {
-          "cuando": {"tambor_gira_lavado": false},
+          "cuando": {"tambor_intenta_centrifugar": true},
           "efecto": "aumenta",
           "peso": 1,
-          "motivo": "Sin movimiento en ninguna etapa, el motor es una posibilidad a revisar."
+          "motivo": "El intento de giro sin lograr centrifugar es compatible con una dificultad de arranque del motor/capacitor."
         },
         {
           "cuando": {"tambor_gira_lavado": true},
@@ -243,7 +237,13 @@
           "cuando": {"codigo_error": true},
           "efecto": "aumenta",
           "peso": 1,
-          "motivo": "El código en display es compatible con falla de control o comunicación."
+          "motivo": "La presencia de un código o mensaje de error es compatible con una anomalía de control, comunicación o electrónica."
+        },
+        {
+          "cuando": {"tambor_intenta_centrifugar": false},
+          "efecto": "aumenta",
+          "peso": 1,
+          "motivo": "La ausencia total de intento de movimiento es compatible con una falta de habilitación desde el control."
         }
       ],
       "servicios_ids": [],
@@ -261,6 +261,7 @@
     "No afirmar un diagnóstico definitivo: hablar siempre de posibilidades a confirmar por el técnico en domicilio.",
     "No indicar al cliente que abra el equipo, manipule la placa, el capacitor, el motor ni componentes energizados.",
     "No pedir que introduzca manos o herramientas en el tambor con el equipo conectado.",
+    "No manipular el motor, el capacitor ni la placa: solo el técnico, con el equipo desconectado.",
     "No asumir falta de repuesto ni prometer reparación sin revisión."
   ],
   "advertencia": "Diagnóstico preliminar orientativo elaborado con los datos informados por el cliente. El técnico debe revisar el equipo en domicilio para confirmar la causa y definir el trabajo necesario."

@@ -1397,6 +1397,306 @@ Ver `docs/DECISIONS.md` (F6-C 18).
 
 ---
 
+# F7-A — Motor determinístico piloto (Heladera → No enfría)
+
+**Estado:** COMPLETADA
+
+**Fecha:** 2026-09-29
+
+## Objetivo
+
+Contar con un motor de diagnóstico determinístico y auditable para el caso
+piloto, separado de Ollama, embeddings y MySQL.
+
+## Implementado
+
+- `utils/motorDiagnostico.js`: `cargarManual/validarManual/normalizarDatos/
+  evaluarCausas/siguientePregunta/resultadoPreliminar/paso`. Scoring +1/-1
+  por evidencia aplicable; niveles alta/media/baja (conteo de indicios, sin
+  probabilidades). Dato conocido jamás se repregunta. Sin LLM, sin
+  embeddings, sin MySQL, sin persistencia.
+- `knowledge/diagnostico_heladera_no_enfria.json`: 5 datos observables, 5
+  causas con `servicios_ids` reales ([3,5]), restricciones y advertencia. Sin
+  precios/garantías en el JSON (viven en MySQL).
+
+## Archivos
+
+Creados: `utils/motorDiagnostico.js`,
+`knowledge/diagnostico_heladera_no_enfria.json`, `tests/f7a-motor-heladera.js`.
+Backup: `.backup-f7a-20260929-104816/`.
+
+## Base de datos
+
+Sin cambios, sin migraciones.
+
+## Tests
+
+`tests/f7a-motor-heladera.js`: 11/11 PASS (carga/validación, sin precios en
+JSON, caso ejemplo multi-causa, pregunta útil, anti-repetición, primera
+pregunta, resultado preliminar, niveles, determinismo, ambiguos ignorados,
+manual inválido rechazado). 100% puros, sin Ollama/MySQL. Re-verificado el
+2026-09-30: 11/11 PASS.
+
+## Resultado
+
+COMPLETADA: motor conservable, base para F7-B.
+
+## Decisiones
+
+Ver `docs/DECISIONS.md` (F7-A 19–20).
+
+## Pendientes
+
+- Extensión a otros equipos como nuevos JSON del mismo formato.
+- Enfoque alternativo de árboles de botones (`arbolDiagnosticoController`)
+  descartado por redundante con este motor.
+
+## Riesgos
+
+- Piloto limitado a un solo manual; el flujo genérico sigue con Ollama
+  decidiendo preguntas.
+
+## Próxima fase
+
+F7-B — piloto gobernado por el motor + cierre (ver abajo).
+
+---
+
+# F7-B-cierre — Compatibilidad de cierre y bloqueantes de auditoría
+
+**Estado:** COMPLETADA
+
+**Fecha:** 2026-09-30
+
+## Objetivo
+
+Resolver los 5 hallazgos bloqueantes de la auditoría F7B del 2026-09-29 sin
+reconstruir el motor ni crear arquitecturas paralelas.
+
+## Implementado
+
+- H1 (contrato roto backend↔frontend): `controllers/chatController.js`
+  agrega `construirWhatsappUrl()` + `camposCierreCompat()` (aditivos). Las 4
+  respuestas exitosas (piloto pregunta/cierre, genérico repetición/cierre)
+  devuelven `listo` (= espejo de `mostrarFormulario`) y `whatsappUrl`
+  (`WHATSAPP_NUMBER`, `null` si falta, nunca 500). `mostrarFormulario` y
+  `resumenParaFormulario` intactos.
+- H1 (frontend): `index.html` acepta `listo===true || mostrarFormulario===
+  true` para el panel WhatsApp, guarda `resumenParaFormulario` en
+  `window.__resumenDiagnostico` y elimina un artefacto de comentario
+  duplicado en `iniciarDiagnostico()` (solo comentario, sin cambio de
+  lógica). Flujo de solicitud/pagos intacto.
+- H2 (suite F6-C rota): `tests/f6c-chat.js` → `_legacy/f6c-chat.js`
+  (testeaba `CIERRE:`/`MAX_PREGUNTAS`/tope 12 ya reemplazados). Nueva suite
+  pura `tests/f7b-cierre-compat.js` (5 checks, sin MySQL/Ollama).
+- H3/H4 (piloto): `esCasoPiloto(equipo, falla?)` con falla opcional
+  normalizada (compat 1-arg intacta); `extraerDatosDiagnostico` filtra por el
+  esquema del manual (sin `void manual`, mismo resultado en el piloto).
+- Enfoque de árboles JSON descartado explícitamente (redundante con
+  `utils/motorDiagnostico.js`); su contenido futuro deberá convertirse al
+  formato datos+causas+evidencia.
+
+## Archivos
+
+Modificados: `controllers/chatController.js`, `index.html`,
+`docs/ROADMAP.md`, `docs/DECISIONS.md`.
+Movidos: `tests/f6c-chat.js` → `_legacy/f6c-chat.js`.
+Creados: `tests/f7b-cierre-compat.js`.
+Backup: `.backup-f7b-cierre-20260930-120000/` (controller, index, f6c,
+ROADMAP, DECISIONS + git-status).
+
+## Base de datos
+
+Sin cambios, sin migraciones, sin escrituras. F7-B etapa 5–6 usa MySQL real
+solo en lectura (`obtenerServiciosPorIds`).
+
+## Tests
+
+`tests/f7b-cierre-compat.js`: 5/5 PASS (URL desde env, espejo de cierre,
+piloto equipo+falla, extracción filtrada, 400).
+`tests/f7a-motor-heladera.js`: 11/11 PASS (re-verificado).
+`tests/f7b-chat-diagnostico.js`: 11/11 PASS (re-verificado, etapas 5–6 con
+MySQL real, sin Ollama).
+Checks `node --check` OK en controller y suite nueva. Sin fixtures, cleanup
+no requerido (suites puras + cierre explícito del pool en la nueva suite).
+
+## Resultado
+
+COMPLETADA: circuito piloto→cierre→derivación reconciliado en ambos
+contratos, motor intacto, sin regresiones.
+
+## Decisiones
+
+Ver `docs/DECISIONS.md` (F7-B-cierre 21–23).
+
+## Pendientes
+
+- Prueba manual real del piloto contra Ollama local (pregunta redactada +
+  cierre con precios MySQL + panel WhatsApp en landing).
+- F6-B sigue pendiente (prueba E2E + decisión `API_URL` hardcodeado en
+  `index.html`, no tocado por alcance).
+- Precarga del formulario de solicitud con `window.__resumenDiagnostico`
+  (guardado, aún sin UI que lo consuma: requiere decisión de producto).
+- Futuros manuales (Aire → No enfría, Lavarropas → Hace ruido) en formato
+  motor, no como árboles.
+
+## Riesgos
+
+- `esCasoPiloto` con 1 arg activa el piloto para cualquier falla de Heladera
+  (comportamiento F7-B original, conservado por compatibilidad).
+- Sin `WHATSAPP_NUMBER` el panel no se muestra (url `null`); el diagnóstico
+  sigue funcionando.
+
+## Próxima fase
+
+Prueba manual contra Ollama local u operativa según prioridad del negocio.
+
+---
+
+# F7B-UI-cierre — Panel de cierre del diagnóstico en landing
+
+**Estado:** COMPLETADA
+
+**Fecha:** 2026-09-30
+
+## Objetivo
+
+Cerrar el circuito F7B en `index.html`: diagnóstico → resumen → autenticación
+existente → método de pago → `/api/pagos/solicitar` → WhatsApp/MP. Sin tocar
+motor, backend, pagos, auth ni DB.
+
+## Implementado
+
+- `index.html` (único archivo de código tocado):
+  - Nuevo panel `#cierreDiagnostico` (CSS `.cierre`, reutiliza `.actions`,
+    `.btn-whatsapp`, `.btn-mp`; DOM seguro, sin `innerHTML` con datos).
+  - `mostrarCierreDiagnostico(resumen)` / `limpiarCierreDiagnostico()`:
+    problema, precio o "A cotizar" (nunca inventado), garantía si existe,
+    causas con nivel tal cual, alternativas si existen (sin sección vacía),
+    aviso sin botones si `servicioId` inválido. Hook al recibir cierre +
+    limpieza en `limpiarChatVisual()`.
+  - `contratarServicio(metodoPago, idServicioForzado?)`: 2.º parámetro
+    opcional para el `servicioId` del resumen; llamados existentes (1 arg)
+    intactos. Reintento único ante 401 (limpia token y re-autentica con
+    `autenticarCliente()`); errores visibles vía `mostrarError`, sin stacks.
+    Respuesta `url` → `window.location.href` (patrón existente, vale para
+    WhatsApp y MP; la URL siempre viene del backend).
+- Sin invitado, sin columnas nuevas, sin migraciones, sin rutas nuevas, sin
+  cambios en motor/embeddings/controllers/tests.
+
+## Archivos
+
+Modificados: `index.html`, `docs/ROADMAP.md`, `docs/DECISIONS.md`.
+Backup: `.backup-f7b-ui-cierre-20260930-130000/` (index, ROADMAP, DECISIONS
++ git-status).
+
+## Base de datos
+
+Sin cambios. Prueba manual creó y eliminó 1 usuario de prueba + 1 turno de
+prueba (efectivo); conteos verificados antes/después: `usuarios=11,
+turnos=3` (datos reales preservados).
+
+## Tests
+
+`tests/f7a-motor-heladera.js`: 11/11 PASS.
+`tests/f7b-chat-diagnostico.js`: 11/11 PASS.
+`tests/f7b-cierre-compat.js`: 5/5 PASS.
+Check sintáctico del JS embebido de `index.html`: OK. Suites F2–F5 no
+afectadas (no comparten código con el frontend del chat).
+
+## Resultado
+
+COMPLETADA: circuito diagnóstico→resumen→cierre→auth→pago verificado.
+
+## Decisiones
+
+Ver `docs/DECISIONS.md` (F7B-UI-cierre 24).
+
+## Problemas encontrados
+
+- En el puerto 3000 corría un `npm start` previo (PID 10692, código anterior
+  a esta tarea): la primera prueba manual pegó contra código viejo (sin
+  `listo`/`whatsappUrl`). Solución: servidor propio en puerto 3001 para no
+  interferir; luego detenido. El proceso 10692 se dejó intacto.
+- R4 manual con historial abreviado hizo repreguntar la luz (correcto: la
+  extracción depende del historial real); repetido con historial completo,
+  el motor avanzó bien.
+- En el cierre real, Ollama repitió la pregunta del freezer pero el tope
+  duro (5 intercambios) cerró igual con `mostrarFormulario:true` (red de
+  seguridad funcionando según diseño).
+- No existe fila `Heladera/No enfría` en `servicios`: el cierre trae
+  `precio:null/servicioId:null` → la UI muestra "A cotizar" y el aviso sin
+  botones (rama verificada); las alternativas [3,5] sí traen precios reales.
+
+## Pendientes
+
+- Prueba con clics reales en navegador (esta tanda verificó a nivel HTTP +
+  lógica UI revisada; sin navegador disponible en el entorno).
+- Flujo `mercado_pago` completo (requiere condiciones externas MP; solo se
+  verificó efectivo→WhatsApp hasta URL 201).
+- Precarga de solicitud con `window.__resumenDiagnostico` más allá del
+  panel (el `servicioId` ya viaja al contratar; el resto del resumen aún no
+  se envía al backend: requiere decisión de producto + eventual migración).
+- F6-B sigue pendiente (E2E + `API_URL`, hoy relativo `/api`).
+
+## Riesgos
+
+- Ninguno nuevo: el panel solo se muestra con cierre + resumen; los botones
+  de contratación del price-box siguen intactos.
+
+## Próxima fase
+
+No continuar con nuevos manuales ni F7C (según instrucción de la tarea).
+
+---
+
+# Fix — Conteo de intercambios pre-truncamiento (flujo genérico + piloto)
+
+**Estado:** COMPLETADA
+
+**Fecha:** 2026-09-30
+
+## Objetivo
+
+Corregir el bug de auditoría: con 5 intercambios reales, el truncamiento a
+`MAX_HISTORIAL=6` descartaba el mensaje automático inicial y el cierre
+obligatorio (`INTERCAMBIOS_MAXIMO=5`) no disparaba (se contaba 4).
+
+## Implementado
+
+- `controllers/chatController.js` (único código tocado):
+  `contarIntercambiosCliente` cuenta sobre el historial crudo (misma firma,
+  filtro de inválidos sin slice); `handleChat` y `handleChatPiloto` le pasan
+  `req.body.historial` (nuevo campo interno `historialCrudo` en el piloto).
+  Export aditivo para verificación. Sin cambios de contrato, topes, prompts,
+  motor, manuales ni frontend.
+- Backup: `.backup-f7b-ui-cierre-20260930-130000/
+  chatController-pre-fix-conteo.js.bak`.
+
+## Tests
+
+Verificación directa del escenario de auditoría: `CONTEO-AUDITORIA=5`.
+Nueva suite `tests/f7b-limite-duro.js`: 2/2 PASS (5 intercambios + `?` →
+cierre con resumen y texto determinístico; 3 intercambios + `?` → sin
+cierre forzado). Ollama simulado vía stub de `fetch`; MySQL real solo en
+lectura; sin fixtures ni escrituras.
+`tests/f7a-motor-heladera.js`: 11/11 PASS.
+`tests/f7b-chat-diagnostico.js`: 11/11 PASS.
+`tests/f7b-cierre-compat.js`: 5/5 PASS.
+`node --check` OK en controller y suite nueva. Tests preexistentes no
+modificados.
+
+## Resultado
+
+COMPLETADA: conteo pre-truncamiento + límite duro
+(`INTERCAMBIOS_MAXIMO` > `?` de Ollama; zona objetivo intacta).
+
+## Decisiones
+
+Ver `docs/DECISIONS.md` (25–26).
+
+---
+
 # KB Etapa 1 — Schema v1.1 + manual Lavarropas → No centrifuga
 
 **Estado:** COMPLETADA
@@ -1436,4 +1736,167 @@ soluciones en cierre) queda como cambio separado.
 ## Decisiones
 
 Ver `docs/DECISIONS.md` (27).
+
+---
+
+# F7B-FORM — Multiple choice genérico del motor
+
+**Estado:** COMPLETADA
+
+**Fecha:** 2026-09-30
+
+## Objetivo
+
+Segunda boca de entrada de datos al motor (botones Sí/No) sin nuevo sistema
+de diagnóstico: motor decide, backend convierte tipo→opciones, frontend
+renderiza genérico, click viaja estructurado, motor recalcula o cierra.
+
+## Implementado
+
+- `controllers/chatController.js`: registro `manuales[]` + `resolverManual`
+  (Heladera+Lavarropas, sin if por equipo; `esCasoPiloto` intacto);
+  `construirPreguntaDiagnostico` (booleano→Sí/No, otros tipos→null);
+  `validarRespuestaEstructurada` (clave∈manual, booleano estricto);
+  `incorporarRespuestaEstructurada` (fusión con precedencia, sin doble
+  evidencia); `handleChatPiloto` recibe `manual`+`respuestaEstructurada`;
+  `handleChat` acepta `mensaje` vacío con bloque válido (genérico lo ignora);
+  logs `[PREGUNTA MOTOR]/[RESPUESTA ESTRUCTURADA]/[DATOS FINALES]/
+  [EVALUACION CAUSAS]/[SIGUIENTE PREGUNTA]`; `armarResumenProblema` filtra
+  vacíos. Contrato de cierre y topes intactos.
+- `index.html`: `#preguntaDiagnostico` + `mostrar/limpiarPreguntaDiagnostico`
+  (genérico por `clave/pregunta/objetivo/tipo/opciones`, DOM seguro);
+  `enviarRespuestaEstructurada` (sin burbuja, sin append a historial,
+  anti-doble-click); `manejarRespuestaChat` extraído sin cambios + render de
+  bloque/limpieza al cerrar; textarea libre intacto.
+- `tests/f7b-formulario-diagnostico.js` (nuevo, 10 checks A–J).
+- Backup: `.backup-kb-etapa1-20260930-140000/` (controller+index pre-form).
+
+## Tests
+
+Nueva suite 10/10. kb-schema 10/10, F7-A 11/11, F7-B 11/11, compat 5/5,
+duro 2/2. `node --check` OK. Prueba manual HTTP Lavarropas: bloque con
+clave+Sí/No → click No aceptado sin texto → siguiente del motor →
+5.º turno cierre (`mostrarFormulario/listo/resumen`, sin bloque).
+
+## Resultado
+
+COMPLETADA (sin commit/push por instrucción).
+
+## Decisiones
+
+Ver `docs/DECISIONS.md` (28).
+
+## Riesgos
+
+- ~~Los clicks no persisten entre turnos~~ RESUELTO por F7B-CARRY (ver abajo):
+  cada turno fusiona previos revalidados + texto + click actual.
+- Sin navegador en el entorno: clicks reales con mouse pendientes (lógica
+  verificada a nivel HTTP + código).
+
+---
+
+# F7B-CARRY — Carry-forward de respuestas estructuradas
+
+**Estado:** COMPLETADA
+
+**Fecha:** 2026-09-30
+
+## Objetivo
+
+Conservar los datos estructurados del Multiple Choice entre turnos para que
+el motor reciba siempre todos los hechos conocidos. Sin rediseñar F7B, sin
+tocar motor/scoring/preguntas/topes/cierre/pagos/auth/agenda/turnos.
+
+## Implementado
+
+- `controllers/chatController.js` (único backend tocado):
+  - `validarDatosDiagnostico(manual, datos)` (nuevo, exportado): revalida el
+    estado acumulado par por par contra el manual (clave ∈ manual, booleano
+    estricto). Pares inválidos se descartan con `console.warn`, nunca 500.
+  - `handleChatPiloto` recibe y fusiona `datosDiagnostico`:
+    `previos revalidados + texto extraído + respuesta actual`, es decir
+    `{...datosExtraidos, ...previos}` + `incorporarRespuestaEstructurada`
+    (precedencia: actual > previos > texto). Luego `normalizarDatos`,
+    `evaluarCausas`, `siguientePregunta` con contratos intactos.
+  - Logs `[DATOS PREVIOS]/[DATOS EXTRAIDOS]/[RESPUESTA ESTRUCTURADA]/
+    [DATOS FINALES]` por turno. Respuesta con eco validado
+    `datosDiagnostico: {...normalizados}` en rama pregunta y en cierre
+    (aditivo; sin causas/scoring internos, sin sensibles).
+  - `handleChat` acepta/recibe `req.body.datosDiagnostico` y lo pasa al
+    piloto. Sin variables globales (estado viaja en el request: multiusuario).
+  - `validarRespuestaEstructurada` / `incorporarRespuestaEstructurada` /
+    `construirPreguntaDiagnostico` / motor intactos (sin if por equipo/clave).
+- `index.html` (único frontend tocado, sin cambios visuales):
+  - `datosDiagnosticoAcumulados = {}` (única fuente del próximo turno; nunca
+    se inventa localmente; se reinicia con cada diagnóstico).
+  - `enviarMensajeAlBackend` y `enviarRespuestaEstructurada` envían
+    `datosDiagnostico`; `manejarRespuestaChat` reemplaza el acumulado por el
+    eco validado del backend. Click: deshabilita botones, sin burbuja, sin
+    append a historial, anti-doble-click (intacto).
+- `tests/f7b-carry-forward.js` (nuevo, 10 checks TEST1–TEST10 según spec).
+- Checkpoint: `.backup-kb-etapa1-20260930-140000/`
+  (`chatController-pre-carryforward.js.bak`,
+  `index-html-pre-carryforward.html.bak`).
+
+## Archivos
+
+Modificados: `controllers/chatController.js`, `index.html`,
+`docs/ROADMAP.md`, `docs/DECISIONS.md`.
+Creados: `tests/f7b-carry-forward.js`.
+Motor `utils/motorDiagnostico.js`: SIN MODIFICACIONES (verificado por diff).
+
+## Base de datos
+
+Sin cambios, sin migraciones, sin escrituras.
+
+## Tests
+
+`tests/f7b-carry-forward.js`: 10/10 PASS (TEST1 primer click; TEST2 segundo
+conserva primero; TEST3 tercer dato; TEST4 sobrescritura; TEST5 texto +
+estructurado; TEST6 clave inválida; TEST7 tipo inválido; TEST8 sin
+duplicación; TEST9 independencia A/B; TEST10 cierre con contrato intacto).
+Regresión: kb-schema-v11 10/10, F7-A 11/11, F7-B 11/11, f7b-cierre-compat
+5/5, f7b-limite-duro 2/2, f7b-formulario-diagnostico 10/10 PASS.
+`node --check` OK en controller, motor y suites. Sin fixtures, cleanup no
+requerido (suites puras + cierre del pool).
+
+## Resultado
+
+COMPLETADA (sin commit/push por instrucción).
+
+Prueba manual Lavarropas → No centrifuga (handleChat real, Ollama simulado):
+
+```text
+T1 bloque: {"clave":"tambor_gira_lavado",...,"opciones":[{"valor":true,"texto":"Sí"},{"valor":false,"texto":"No"}]}
+T1 datos: {}
+[DATOS PREVIOS] {"tambor_gira_lavado":true}
+[RESPUESTA ESTRUCTURADA] {"clave":"motor_zumba","valor":false}
+[DATOS FINALES] {"tambor_gira_lavado":true,"motor_zumba":false}
+T3 datos: {"tambor_gira_lavado":true,"motor_zumba":false}
+```
+
+El segundo turno conserva el primer dato; el motor los recibe juntos.
+
+## Decisiones
+
+Ver `docs/DECISIONS.md` (29).
+
+## Problemas encontrados
+
+- Ninguno bloqueante: la fusión `{...extraidos, ...previos}` + estructurada
+  implementa exactamente la precedencia actual > previos > texto del spec.
+
+## Pendientes
+
+- Clicks reales con mouse en navegador (lógica verificada HTTP + código).
+- Futuros manuales en formato motor (no árboles).
+
+## Riesgos
+
+- Ninguno nuevo: el eco `datosDiagnostico` expone solo claves/valores
+  booleanos validados del manual; el frontend no es autoridad.
+
+## Próxima fase
+
+No continuar con nuevos manuales ni F7C sin instrucción explícita.
 

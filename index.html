@@ -274,6 +274,53 @@
             color: #64748b;
         }
 
+        /* F7B-UI: panel de cierre del diagnóstico. Reutiliza botones
+           y acciones existentes (.actions, .btn-whatsapp, .btn-mp). */
+        .cierre {
+            display: none;
+            margin-top: 20px;
+            padding: 18px;
+            border-radius: 12px;
+            background: #f8fafc;
+            border: 1px solid #cbd5e1;
+        }
+
+        .cierre h3 {
+            margin: 0 0 10px 0;
+        }
+
+        .cierre dl {
+            margin: 0 0 10px 0;
+        }
+
+        .cierre dt {
+            font-weight: bold;
+            margin-top: 10px;
+        }
+
+        .cierre dd {
+            margin: 4px 0 0 0;
+        }
+
+        .cierre ul {
+            margin: 6px 0 0 0;
+            padding-left: 20px;
+        }
+
+        .cierre .price {
+            font-size: 24px;
+        }
+
+        /* F7B-FORM: opciones del multiple choice (reutiliza .actions). */
+        .btn-opcion {
+            background: #0f172a;
+            color: white;
+        }
+
+        .btn-opcion:hover:not(:disabled) {
+            background: #1e293b;
+        }
+
         @media (max-width: 650px) {
             .card {
                 padding: 18px;
@@ -438,8 +485,20 @@
         </div>
 
         <div
+            id="preguntaDiagnostico"
+            class="cierre"
+        >
+        </div>
+
+        <div
             id="diagnosticResult"
             class="diagnostic"
+        >
+        </div>
+
+        <div
+            id="cierreDiagnostico"
+            class="cierre"
         >
         </div>
 
@@ -459,6 +518,11 @@
 
     let serviciosDB = [];
     let historialChat = [];
+
+    /* F7B-FORM: estado estructurado acumulado (eco validado del backend).
+       Se envía cada turno y se reemplaza por lo que devuelve el backend;
+       nunca se inventa localmente. Se reinicia con cada diagnóstico. */
+    let datosDiagnosticoAcumulados = {};
 
     let servicioSeleccionado = null;
     let chatActivo = false;
@@ -578,6 +642,15 @@
 
         resultado.replaceChildren();
         delete resultado.dataset.handoff;
+
+        /* F7B-UI: el cierre pertenece al diagnóstico actual. */
+        limpiarCierreDiagnostico();
+
+        /* F7B-FORM: la pregunta pendiente también se reinicia. */
+        limpiarPreguntaDiagnostico();
+
+        /* F7B-FORM: el estado estructurado también se reinicia. */
+        datosDiagnosticoAcumulados = {};
     }
 
 
@@ -928,12 +1001,6 @@
                 `${servicioSeleccionado.falla}`;
 
         document
-    /*
-    
-     * ---------------------------------------------------------
-     * CHAT
-     * ---------------------------------------------------------
-     */
             .getElementById('diagnosticResult')
             .style.display = 'none';
 
@@ -1048,7 +1115,10 @@
                                 servicioSeleccionado.falla,
 
                             historial:
-                                historialParaBackend
+                                historialParaBackend,
+
+                            datosDiagnostico:
+                                datosDiagnosticoAcumulados
                         })
                         
                     }
@@ -1095,41 +1165,7 @@
 /*******  eba36019-d273-4214-b2fd-2ebe5cf26032  *******/
             });
 
-            /*
-             * Si el backend devolvió datos oficiales,
-             * actualizamos el precio/garantía mostrado.
-             */
-            if (
-                data.precio !== null &&
-                data.precio !== undefined
-            ) {
-                document
-                    .getElementById('precioServicio')
-                    .textContent =
-                        `$${Number(data.precio)
-                            .toLocaleString('es-AR')} ARS`;
-            }
-
-            if (data.garantia) {
-                document
-                    .getElementById('garantiaServicio')
-                    .textContent =
-                        `Garantía: ${data.garantia}`;
-            }
-
-            /*
-             * F6-C: cierre del flujo corto.
-             * El backend indica listo=true con la URL de WhatsApp
-             * (armada con WHATSAPP_NUMBER del servidor; el número
-             * nunca se hardcodea acá). Se muestra una sola vez.
-             */
-            if (
-                data.listo === true &&
-                typeof data.whatsappUrl === 'string' &&
-                data.whatsappUrl.length > 0
-            ) {
-                mostrarDerivacionWhatsApp(data.whatsappUrl);
-            }
+            manejarRespuestaChat(data);
 
         } catch (error) {
 
@@ -1149,6 +1185,344 @@
              * del usuario en historial. Así no perdemos
              * lo que escribió.
              */
+
+        } finally {
+
+            enviandoMensaje = false;
+
+            mostrarPensando(false);
+
+            actualizarBotonEnviar();
+
+            document
+                .getElementById('chatInput')
+                .focus();
+        }
+    }
+
+
+    /*
+     * Manejo común de la respuesta del chat (texto libre o formulario).
+     * Extraído sin cambios de enviarMensajeAlBackend + render de
+     * preguntaDiagnostico (F7B-FORM).
+     */
+    function manejarRespuestaChat(data) {
+
+        /*
+         * Si el backend devolvió datos oficiales,
+         * actualizamos el precio/garantía mostrado.
+         */
+        if (
+            data.precio !== null &&
+            data.precio !== undefined
+        ) {
+            document
+                .getElementById('precioServicio')
+                .textContent =
+                    `$${Number(data.precio)
+                        .toLocaleString('es-AR')} ARS`;
+        }
+
+        if (data.garantia) {
+            document
+                .getElementById('garantiaServicio')
+                .textContent =
+                    `Garantía: ${data.garantia}`;
+        }
+
+        /*
+         * F7B-cierre: el backend indica el cierre con mostrarFormulario
+         * (contrato F7B) y además envía listo/whatsappUrl por
+         * compatibilidad F6-C. Se aceptan ambas señales; el panel de
+         * derivación se muestra una sola vez. El resumen estructurado
+         * (si viene) se guarda para precargar la solicitud del servicio
+         * sin pedir los datos de nuevo al cliente.
+         */
+        if (
+            data.resumenParaFormulario !== null &&
+            data.resumenParaFormulario !== undefined
+        ) {
+            window.__resumenDiagnostico =
+                data.resumenParaFormulario;
+        }
+
+        /* F7B-FORM: eco validado del estado acumulado (única fuente para el
+           próximo turno; nunca se inventa localmente). */
+        if (
+            data.datosDiagnostico !== null &&
+            typeof data.datosDiagnostico === 'object' &&
+            !Array.isArray(data.datosDiagnostico)
+        ) {
+            datosDiagnosticoAcumulados =
+                data.datosDiagnostico;
+        }
+
+        const cerroDiagnostico =
+            data.listo === true ||
+            data.mostrarFormulario === true;
+
+        /* Al cerrar se retira cualquier pregunta pendiente del formulario. */
+        if (cerroDiagnostico) {
+            limpiarPreguntaDiagnostico();
+        }
+
+        /* F7B-UI: al cerrar con resumen, mostrar el panel de cierre. */
+        if (
+            cerroDiagnostico &&
+            data.resumenParaFormulario !== null &&
+            data.resumenParaFormulario !== undefined
+        ) {
+            mostrarCierreDiagnostico(
+                data.resumenParaFormulario
+            );
+        }
+
+        if (
+            cerroDiagnostico &&
+            typeof data.whatsappUrl === 'string' &&
+            data.whatsappUrl.length > 0
+        ) {
+            mostrarDerivacionWhatsApp(data.whatsappUrl);
+        }
+
+        /* F7B-FORM: pregunta estructurada del motor (aditiva). */
+        if (
+            !cerroDiagnostico &&
+            data.preguntaDiagnostico !== null &&
+            data.preguntaDiagnostico !== undefined
+        ) {
+            mostrarPreguntaDiagnostico(
+                data.preguntaDiagnostico
+            );
+        }
+    }
+
+
+    /*
+     * ---------------------------------------------------------
+     * FORMULARIO F7B: multiple choice genérico del motor
+     * ---------------------------------------------------------
+     *
+     * Renderiza preguntaDiagnostico {clave, pregunta, objetivo, tipo,
+     * opciones[]} sin conocer ninguna clave: sirve para cualquier manual.
+     * El click viaja como respuestaEstructurada {clave, valor}; NUNCA como
+     * mensaje textual (sin doble extracción ni doble conteo).
+     */
+
+    function limpiarPreguntaDiagnostico() {
+        const panel =
+            document.getElementById('preguntaDiagnostico');
+
+        if (!panel) {
+            return;
+        }
+
+        panel.replaceChildren();
+        panel.style.display = 'none';
+    }
+
+
+    function mostrarPreguntaDiagnostico(bloque) {
+        const panel =
+            document.getElementById('preguntaDiagnostico');
+
+        if (!panel || !bloque) {
+            return;
+        }
+
+        /* Solo tipos con renderer implementado (hoy: booleano). */
+        if (
+            typeof bloque.clave !== 'string' ||
+            typeof bloque.pregunta !== 'string' ||
+            !Array.isArray(bloque.opciones) ||
+            bloque.opciones.length === 0
+        ) {
+            limpiarPreguntaDiagnostico();
+            return;
+        }
+
+        panel.replaceChildren();
+
+        const texto =
+            document.createElement('p');
+
+        const fuerte =
+            document.createElement('strong');
+
+        fuerte.textContent = bloque.pregunta;
+
+        texto.appendChild(fuerte);
+        panel.appendChild(texto);
+
+        if (bloque.objetivo) {
+            const ayuda =
+                document.createElement('p');
+
+            ayuda.className = 'small';
+            ayuda.textContent = String(bloque.objetivo);
+
+            panel.appendChild(ayuda);
+        }
+
+        const acciones =
+            document.createElement('div');
+
+        acciones.className = 'actions';
+
+        bloque.opciones.forEach(opcion => {
+            if (
+                !opcion ||
+                opcion.valor === undefined ||
+                opcion.valor === null
+            ) {
+                return;
+            }
+
+            const boton =
+                document.createElement('button');
+
+            boton.type = 'button';
+            boton.className = 'btn-opcion';
+            boton.textContent =
+                typeof opcion.texto === 'string'
+                    ? opcion.texto
+                    : String(opcion.valor);
+
+            boton.addEventListener(
+                'click',
+                () => {
+                    /* Anti doble click: se deshabilita todo el panel. */
+                    panel
+                        .querySelectorAll('button')
+                        .forEach(b => {
+                            b.disabled = true;
+                        });
+
+                    enviarRespuestaEstructurada(
+                        bloque.clave,
+                        opcion.valor
+                    );
+                }
+            );
+
+            acciones.appendChild(boton);
+        });
+
+        panel.appendChild(acciones);
+        panel.style.display = 'block';
+    }
+
+
+    async function enviarRespuestaEstructurada(clave, valor) {
+
+        if (!servicioSeleccionado || enviandoMensaje || !chatActivo) {
+            return;
+        }
+
+        enviandoMensaje = true;
+        actualizarBotonEnviar();
+
+        mostrarPensando(true);
+
+        try {
+
+            /*
+             * El click NO se agrega al historial ni como burbuja:
+             * viaja únicamente como respuestaEstructurada. El mensaje va
+             * vacío (el backend lo permite cuando hay bloque válido) para
+             * no contaminar el extractor con texto inventado.
+             */
+            const historialParaBackend =
+                [...historialChat];
+
+            console.log('[CHAT-FRONT] Enviando respuesta estructurada...');
+            console.time('[CHAT-FRONT] Tiempo total');
+
+            const response =
+                await fetch(
+                    `${API_URL}/chat`,
+                    {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type':
+                                'application/json'
+                        },
+                        body: JSON.stringify({
+                            mensaje: '',
+
+                            equipoSeleccionado:
+                                servicioSeleccionado.equipo,
+
+                            fallaSeleccionada:
+                                servicioSeleccionado.falla,
+
+                            historial:
+                                historialParaBackend,
+
+                            respuestaEstructurada: {
+                                clave,
+                                valor
+                            },
+
+                            datosDiagnostico:
+                                datosDiagnosticoAcumulados
+                        })
+                    }
+                );
+
+            console.timeEnd('[CHAT-FRONT] Tiempo total');
+            console.log('[CHAT-FRONT] HTTP:', response.status);
+
+            let data = {};
+
+            try {
+                data =
+                    await response.json();
+            } catch {
+                data = {};
+            }
+
+            if (!response.ok) {
+                throw new Error(
+                    data.error ||
+                    `Error HTTP ${response.status}`
+                );
+            }
+
+            const respuesta =
+                typeof data.respuesta === 'string'
+                    ? data.respuesta.trim()
+                    : '';
+
+            if (!respuesta) {
+                throw new Error(
+                    'El asistente no devolvió una respuesta.'
+                );
+            }
+
+            agregarMensaje(
+                'asistente',
+                respuesta
+            );
+
+            historialChat.push({
+                rol: 'asistente',
+                contenido: respuesta
+            });
+
+            manejarRespuestaChat(data);
+
+        } catch (error) {
+
+            console.error(
+                '[CHAT] Error:',
+                error
+            );
+
+            mostrarError(
+                error.message ||
+                'No se pudo comunicar con el asistente.'
+            );
 
         } finally {
 
@@ -1275,15 +1649,279 @@
 
     /*
      * ---------------------------------------------------------
+     * CIERRE F7B: resumen + contratación desde el diagnóstico
+     * ---------------------------------------------------------
+     *
+     * Lee window.__resumenDiagnostico (puente ya existente) y muestra
+     * problema / precio ("A cotizar" si es null) / garantía / causas
+     * (nivel tal cual) / alternativas. Todo con DOM seguro.
+     * La contratación reutiliza autenticarCliente() + contratarServicio()
+     * con el servicioId del resumen. Sin usuariosId desde frontend.
+     */
+
+    function limpiarCierreDiagnostico() {
+        const panel =
+            document.getElementById('cierreDiagnostico');
+
+        if (!panel) {
+            return;
+        }
+
+        panel.replaceChildren();
+        panel.style.display = 'none';
+    }
+
+
+    function agregarDatoCierre(lista, termino, valor) {
+        const dt = document.createElement('dt');
+        dt.textContent = termino;
+
+        const dd = document.createElement('dd');
+        dd.textContent = valor;
+
+        lista.appendChild(dt);
+        lista.appendChild(dd);
+    }
+
+
+    function mostrarCierreDiagnostico(resumen) {
+        const panel =
+            document.getElementById('cierreDiagnostico');
+
+        if (!panel || !resumen) {
+            return;
+        }
+
+        panel.replaceChildren();
+
+        const titulo =
+            document.createElement('h3');
+
+        titulo.textContent =
+            'Resumen del diagnóstico';
+
+        panel.appendChild(titulo);
+
+        const lista =
+            document.createElement('dl');
+
+        if (resumen.problema) {
+            agregarDatoCierre(
+                lista,
+                'Detalle',
+                String(resumen.problema)
+            );
+        }
+
+        if (
+            resumen.precio !== null &&
+            resumen.precio !== undefined
+        ) {
+            agregarDatoCierre(
+                lista,
+                'Precio registrado',
+                `$${Number(resumen.precio).toLocaleString('es-AR')} ARS`
+            );
+        } else {
+            agregarDatoCierre(
+                lista,
+                'Precio registrado',
+                'A cotizar'
+            );
+        }
+
+        if (resumen.garantia) {
+            agregarDatoCierre(
+                lista,
+                'Garantía',
+                String(resumen.garantia)
+            );
+        }
+
+        panel.appendChild(lista);
+
+        const diagnostico =
+            resumen.diagnostico || {};
+
+        if (
+            Array.isArray(diagnostico.causas) &&
+            diagnostico.causas.length > 0
+        ) {
+            const subtitulo =
+                document.createElement('p');
+
+            const fuerte =
+                document.createElement('strong');
+
+            fuerte.textContent =
+                'Posibles causas (orientativo, a confirmar en domicilio)';
+
+            subtitulo.appendChild(fuerte);
+            panel.appendChild(subtitulo);
+
+            const causas =
+                document.createElement('ul');
+
+            diagnostico.causas.forEach(causa => {
+                if (!causa || !causa.nombre) {
+                    return;
+                }
+
+                const item =
+                    document.createElement('li');
+
+                item.textContent =
+                    `${causa.nombre} — nivel: ${causa.nivel}`;
+
+                causas.appendChild(item);
+            });
+
+            panel.appendChild(causas);
+        }
+
+        if (
+            Array.isArray(resumen.alternativas) &&
+            resumen.alternativas.length > 0
+        ) {
+            const subtitulo =
+                document.createElement('p');
+
+            const fuerte =
+                document.createElement('strong');
+
+            fuerte.textContent =
+                'Servicios relacionados';
+
+            subtitulo.appendChild(fuerte);
+            panel.appendChild(subtitulo);
+
+            const alts =
+                document.createElement('ul');
+
+            resumen.alternativas.forEach(alt => {
+                if (!alt || !alt.falla) {
+                    return;
+                }
+
+                const item =
+                    document.createElement('li');
+
+                const precioTexto =
+                    alt.precio !== null &&
+                    alt.precio !== undefined
+                        ? ` — $${Number(alt.precio).toLocaleString('es-AR')} ARS`
+                        : ' — A cotizar';
+
+                item.textContent =
+                    `${alt.equipo} — ${alt.falla}${precioTexto}`;
+
+                alts.appendChild(item);
+            });
+
+            panel.appendChild(alts);
+        }
+
+        const servicioId = Number(resumen.servicioId);
+
+        if (
+            !Number.isInteger(servicioId) ||
+            servicioId <= 0
+        ) {
+            const aviso =
+                document.createElement('p');
+
+            aviso.className = 'small';
+            aviso.textContent =
+                'No se pudo identificar el servicio para contratar. ' +
+                'Podés continuar por WhatsApp con el asesor.';
+
+            panel.appendChild(aviso);
+            panel.style.display = 'block';
+
+            return;
+        }
+
+        const acciones =
+            document.createElement('div');
+
+        acciones.className = 'actions';
+
+        const btnEfectivo =
+            document.createElement('button');
+
+        btnEfectivo.type = 'button';
+        btnEfectivo.className = 'btn-whatsapp';
+        btnEfectivo.textContent = 'Solicitar por WhatsApp';
+
+        btnEfectivo.addEventListener(
+            'click',
+            () => contratarServicio(
+                'efectivo_whatsapp',
+                servicioId
+            )
+        );
+
+        const btnMP =
+            document.createElement('button');
+
+        btnMP.type = 'button';
+        btnMP.className = 'btn-mp';
+        btnMP.textContent = 'Pagar con Mercado Pago';
+
+        btnMP.addEventListener(
+            'click',
+            () => contratarServicio(
+                'mercado_pago',
+                servicioId
+            )
+        );
+
+        acciones.appendChild(btnEfectivo);
+        acciones.appendChild(btnMP);
+        panel.appendChild(acciones);
+
+        const nota =
+            document.createElement('p');
+
+        nota.className = 'small';
+        nota.textContent =
+            'Te vamos a pedir tu teléfono para identificarte y luego ' +
+            'procesamos la solicitud.';
+
+        panel.appendChild(nota);
+
+        panel.style.display = 'block';
+    }
+
+
+    /*
+     * ---------------------------------------------------------
      * CONTRATAR SERVICIO
      * ---------------------------------------------------------
      */
 
+    /*
+     * F7B-UI: idServicioForzado permite contratar desde el resumen del
+     * diagnóstico (window.__resumenDiagnostico.servicioId) sin depender del
+     * servicio seleccionado en el formulario. Los llamados existentes con
+     * un solo argumento mantienen el comportamiento original.
+     */
     async function contratarServicio(
-        metodoPago
+        metodoPago,
+        idServicioForzado
     ) {
 
-        if (!servicioSeleccionado) {
+        const idServicio =
+            idServicioForzado !== null &&
+            idServicioForzado !== undefined
+                ? Number(idServicioForzado)
+                : (
+                    servicioSeleccionado
+                        ? Number(servicioSeleccionado.servicios_id)
+                        : NaN
+                );
+
+        if (!Number.isInteger(idServicio) || idServicio <= 0) {
             mostrarError(
                 'Primero seleccioná un servicio.'
             );
@@ -1299,6 +1937,11 @@
             return;
         }
 
+        /* F7B-UI: ante 401 se reintenta una vez re-autenticando con el
+           mecanismo existente (el token guardado pudo expirar). */
+        let reintento401Hecho = false;
+
+        while (true) {
         try {
 
             mostrarInfo(
@@ -1313,8 +1956,7 @@
                         headers:
                             obtenerHeadersAutenticados(),
                         body: JSON.stringify({
-                            idServicio:
-                                servicioSeleccionado.servicios_id,
+                            idServicio,
 
                             metodoPago
                         })
@@ -1323,6 +1965,21 @@
 
             const data =
                 await response.json();
+
+            if (response.status === 401 && !reintento401Hecho) {
+                reintento401Hecho = true;
+                ocultarInfo();
+                localStorage.removeItem('serviceVT_token');
+
+                const reautenticado =
+                    await autenticarCliente();
+
+                if (!reautenticado) {
+                    return;
+                }
+
+                continue;
+            }
 
             if (!response.ok) {
                 throw new Error(
@@ -1359,6 +2016,9 @@
                 error.message ||
                 'No se pudo procesar la solicitud.'
             );
+
+            return;
+        }
         }
     }
 

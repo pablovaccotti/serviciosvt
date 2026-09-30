@@ -1,0 +1,173 @@
+{
+  "version": "1.0.0",
+  "equipo": "Heladera",
+  "problema": "No enfría",
+  "descripcion": "Caso piloto del Manual Maestro de Diagnóstico ServiceVT. El JSON describe conocimiento técnico preliminar (síntoma → posibles causas). NUNCA contiene precios, garantías ni servicios con montos: esos datos viven en MySQL (tabla servicios) y los resuelve el motor por servicios_ids.",
+  "datos_observables": [
+    {
+      "clave": "luz_interior",
+      "pregunta": "¿La luz interior de la heladera enciende cuando abrís la puerta?",
+      "objetivo": "Saber si el equipo recibe energía eléctrica. Sin luz, el problema puede ser de alimentación y no del circuito de frío.",
+      "tipo": "booleano"
+    },
+    {
+      "clave": "freezer_enfria",
+      "pregunta": "¿El freezer sigue enfriando normalmente, o también perdió el frío?",
+      "objetivo": "Distinguir una pérdida total de frío de un problema de distribución de aire entre el freezer y la heladera.",
+      "tipo": "booleano"
+    },
+    {
+      "clave": "compresor_se_escucha",
+      "pregunta": "¿Escuchás que el motor (compresor) arranca o trabaja por momentos?",
+      "objetivo": "Saber si el compresor intenta funcionar o permanece detenido.",
+      "tipo": "booleano"
+    },
+    {
+      "clave": "clic_arranque",
+      "pregunta": "¿Se escucha un clic cada tanto, como si algo intentara arrancar y se cortara?",
+      "objetivo": "El clic repetitivo es un indicio observable del sistema de arranque o del protector térmico actuando.",
+      "tipo": "booleano"
+    },
+    {
+      "clave": "hielo_acumulado",
+      "pregunta": "¿Ves hielo o escarcha acumulada en el freezer o en las paredes internas?",
+      "objetivo": "El hielo acumulado puede bloquear la circulación del aire frío aunque el equipo genere frío.",
+      "tipo": "booleano"
+    }
+  ],
+  "causas": [
+    {
+      "id": "sistema_arranque_termostato",
+      "nombre": "Sistema de arranque / termostato",
+      "descripcion": "El relé de arranque, el protector térmico o el termostato no habilitan la puesta en marcha del compresor.",
+      "nivel_base": "media",
+      "evidencia": [
+        {
+          "cuando": { "luz_interior": true },
+          "efecto": "aumenta",
+          "motivo": "La luz indica que el equipo recibe energía; la falla estaría en el circuito de arranque o control."
+        },
+        {
+          "cuando": { "compresor_se_escucha": false },
+          "efecto": "aumenta",
+          "motivo": "El compresor no trabaja; el arranque o el termostato podrían no estar habilitándolo."
+        },
+        {
+          "cuando": { "clic_arranque": true },
+          "efecto": "aumenta",
+          "motivo": "El clic repetitivo es compatible con el relé de arranque o el protector térmico actuando."
+        },
+        {
+          "cuando": { "luz_interior": false },
+          "efecto": "disminuye",
+          "motivo": "Sin luz interior, primero hay que verificar la alimentación antes de sospechar del arranque."
+        }
+      ],
+      "servicios_ids": [5, 3]
+    },
+    {
+      "id": "compresor",
+      "nombre": "Compresor / motor",
+      "descripcion": "El compresor no logra ponerse en marcha o trabajar (bloqueo mecánico o bobinado, entre otras).",
+      "nivel_base": "media",
+      "evidencia": [
+        {
+          "cuando": { "luz_interior": true },
+          "efecto": "aumenta",
+          "motivo": "Con energía en el equipo y sin frío, el compresor es una de las posibilidades a revisar."
+        },
+        {
+          "cuando": { "compresor_se_escucha": false },
+          "efecto": "aumenta",
+          "motivo": "El compresor permanece detenido."
+        },
+        {
+          "cuando": { "freezer_enfria": true },
+          "efecto": "disminuye",
+          "motivo": "Si el freezer enfría, el compresor está trabajando."
+        },
+        {
+          "cuando": { "clic_arranque": true },
+          "efecto": "disminuye",
+          "motivo": "El clic orienta en primer lugar al sistema de arranque, sin descartar el compresor."
+        }
+      ],
+      "servicios_ids": [3]
+    },
+    {
+      "id": "sistema_refrigerante",
+      "nombre": "Sistema refrigerante",
+      "descripcion": "El circuito frigorífico no intercambia calor como debería (fuga, obstrucción, entre otras). Solo verificable en domicilio.",
+      "nivel_base": "media",
+      "evidencia": [
+        {
+          "cuando": { "compresor_se_escucha": true },
+          "efecto": "aumenta",
+          "motivo": "Si el compresor trabaja pero no hay frío, el problema puede estar en el circuito frigorífico."
+        },
+        {
+          "cuando": { "freezer_enfria": false },
+          "efecto": "aumenta",
+          "motivo": "La pérdida de frío en ambos compartimentos es compatible con el circuito frigorífico."
+        },
+        {
+          "cuando": { "freezer_enfria": true },
+          "efecto": "disminuye",
+          "motivo": "Con freezer frío, el circuito frigorífico está generando frío."
+        }
+      ],
+      "servicios_ids": []
+    },
+    {
+      "id": "distribucion_aire",
+      "nombre": "Distribución de aire / ventilador / deshielo",
+      "descripcion": "El frío se genera pero no llega a la heladera (ventilador evaporador, hielo, conductos o damper según modelo).",
+      "nivel_base": "media",
+      "evidencia": [
+        {
+          "cuando": { "freezer_enfria": true },
+          "efecto": "aumenta",
+          "motivo": "Freezer frío con heladera caliente orienta a circulación de aire, ventilador, hielo o conductos."
+        },
+        {
+          "cuando": { "hielo_acumulado": true },
+          "efecto": "aumenta",
+          "motivo": "El hielo acumulado bloquea la circulación del aire frío."
+        },
+        {
+          "cuando": { "freezer_enfria": false },
+          "efecto": "disminuye",
+          "motivo": "Sin frío en ningún compartimento, no se trata solo de distribución."
+        }
+      ],
+      "servicios_ids": []
+    },
+    {
+      "id": "alimentacion_electrica",
+      "nombre": "Alimentación eléctrica",
+      "descripcion": "El equipo podría no estar recibiendo energía (enchufe, corte de luz, térmica). Verificación del cliente, sin manipular nada.",
+      "nivel_base": "media",
+      "evidencia": [
+        {
+          "cuando": { "luz_interior": false },
+          "efecto": "aumenta",
+          "motivo": "Sin luz interior, el equipo podría no estar recibiendo energía eléctrica."
+        },
+        {
+          "cuando": { "luz_interior": true },
+          "efecto": "disminuye",
+          "motivo": "Con luz interior, el equipo recibe energía."
+        }
+      ],
+      "servicios_ids": []
+    }
+  ],
+  "restricciones": [
+    "No afirmar un diagnóstico definitivo: hablar siempre de posibilidades a confirmar por el técnico en domicilio.",
+    "No indicar al cliente que mida tensión, puentee componentes, abra placas, manipule refrigerante ni desarme partes energizadas.",
+    "No afirmar automáticamente que 'le falta gas' ante pérdida de frío.",
+    "No asumir falta de gas ante hielo acumulado: considerar deshielo, flujo de aire, sensores y sellado según modelo.",
+    "No pedir datos del equipo (marca/modelo) como condición para orientar; solo si aportan al caso."
+  ],
+  "advertencia": "Diagnóstico preliminar orientativo elaborado con los datos informados por el cliente. El técnico debe revisar el equipo en domicilio para confirmar la causa y definir el trabajo necesario."
+}

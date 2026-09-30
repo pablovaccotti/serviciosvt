@@ -53,6 +53,44 @@ No borrar el historial anterior.
 
 ---
 
+## F7-A (2026-09-29) — Motor determinístico piloto Heladera → No enfría
+
+19. **Motor puro y conservable, sin LLM ni embeddings ni MySQL.** `utils/motorDiagnostico.js` decide la siguiente pregunta o el resultado preliminar con reglas auditables (+1/-1 por evidencia, niveles alta/media/baja como conteo de indicios, nunca probabilidad). El JSON del manual nunca contiene precios/garantías (validado por `validarManual` y por test).
+20. **Un manual = un caso piloto.** `knowledge/diagnostico_heladera_no_enfria.json` (5 datos observables, 5 causas con `servicios_ids` reales). Futuros equipos se agregan como nuevos JSON en este formato, no como árboles de botones ni motores paralelos (enfoque `arbolDiagnosticoController` descartado explícitamente por redundante).
+
+---
+
+## F7-B-cierre (2026-09-30) — Compatibilidad de cierre sin re-arquitectura
+
+21. **Contrato de cierre dual y aditivo.** El backend responde `mostrarFormulario/resumenParaFormulario` (F7B) y además `listo/whatsappUrl` (compat F6-C, `listo` = espejo de `mostrarFormulario`). `whatsappUrl` sale de `WHATSAPP_NUMBER`, es `null` si falta y nunca genera 500 en el chat. El frontend acepta ambas señales y guarda `resumenParaFormulario` en `window.__resumenDiagnostico` para precarga futura; el flujo de solicitud (`POST /api/pagos/solicitar`) no se tocó.
+22. **Suite F6-C retirada como legacy, no resucitada.** `tests/f6c-chat.js` → `_legacy/f6c-chat.js`: testeaba el mecanismo `CIERRE:`/`MAX_PREGUNTAS=4`/`tope 12` ya reemplazado por el motor + topes 3/5; restaurarlo habría exigido re-agregar comportamiento eliminado. La cobertura vigente es F7-A (11), F7-B (11) y `tests/f7b-cierre-compat.js` (5, puro).
+23. **Endurecimiento mínimo del piloto.** `esCasoPiloto(equipo, falla?)` mantiene compatibilidad con 1 arg y, si se pasa falla, exige coincidencia normalizada con el problema del manual. `extraerDatosDiagnostico` filtra por las claves del esquema del manual (las cues siguen siendo las del piloto, sin inventar datos).
+
+---
+
+## F7B-UI-cierre (2026-09-30) — UI de cierre con autenticación existente
+
+24. **El cierre F7B utiliza la autenticación existente por teléfono/JWT. No se implementa usuario invitado sin sesión en esta fase.** El panel lee `window.__resumenDiagnostico`, muestra problema/precio ("A cotizar" si null)/garantía/causas (nivel tal cual)/alternativas, y contrata con `contratarServicio(metodoPago, servicioId)` → `POST /api/pagos/solicitar` con JWT (sin `usuariosId` desde frontend). Sin invitado, sin nuevas columnas, sin migraciones, sin rutas nuevas.
+
+---
+
+## Fix cierre genérico (2026-09-30) — conteo pre-truncamiento
+
+25. **Los topes de cierre cuentan intercambios sobre el historial crudo, no sobre el truncado.** `contarIntercambiosCliente` filtra inválidos pero ya no depende del slice de `normalizarHistorial`; `handleChat` y `handleChatPiloto` le pasan `req.body.historial`. Sin cambios de contrato, topes ni prompts.
+26. **Límite duro: `INTERCAMBIOS_MAXIMO` prevalece sobre Ollama.** Con 5 intercambios reales, aunque la respuesta termine en `?`, no hay sexta pregunta: se reemplaza por el cierre determinístico con `resumenParaFormulario` (`mostrarFormulario`/`listo` true). En zona objetivo (3–4) se mantiene el comportamiento actual (`?` no fuerza cierre). Topes 3/5 intactos.
+
+---
+
 ## KB Etapa 1 (2026-09-30) — Schema v1.1 estructural + manual Lavarropas
 
 27. **Schema v1.1 aditivo e inerte.** `validarManual` acepta opcionales `variantes[]`, `aplica_variantes[]` (referencial), `sinonimos[]`, `peso` (entero ≥1, ausente = 1) y `soluciones[]` (sin precio/garantía, que siguen prohibidos). Scoring, preguntas, niveles y `resultadoPreliminar` intactos: el peso se valida pero no pondera (toda evidencia ±1). `nivel_base` se conserva como legado. Manual piloto `Lavarropas → No centrifuga` (7 datos, 6 causas, `servicios_ids:[]` sin inventar); resto del catálogo pendiente de validación técnica.
+
+---
+
+## F7B-FORM (2026-09-30) — Multiple choice genérico del motor
+
+28. **El formulario es otra boca de datos, no otro motor.** Rama pregunta devuelve `preguntaDiagnostico{clave,pregunta,objetivo,tipo,opciones}` aditivo (booleano→Sí/No por código; tipos sin renderer → null + texto libre). `respuestaEstructurada{clave,valor}` opcional, validada contra el manual (booleano estricto, sin claves inyectadas), con precedencia sobre el texto y sin duplicarse como mensaje ni conteo paralelo. Registro de manuales por `{equipo,problema}` (Heladera+Lavarropas) sin `if` por equipo; `esCasoPiloto` conservado.
+
+## F7B-CARRY (2026-09-30) — Persistencia acumulativa sin tocar el motor
+
+29. **El diagnóstico es acumulativo y el backend valida todo.** Cada turno fusiona `previos revalidados + texto + respuesta actual` (precedencia actual > previos > texto) vía `validarDatosDiagnostico` + `incorporarRespuestaEstructurada`, y recién después `normalizarDatos/evaluarCausas/siguientePregunta` con contratos intactos. El estado viaja en `datosDiagnostico` por request (sin globales, multiusuario); el eco de respuesta es solo `{clave:boolean}` validado. Clicks nunca se convierten en texto; Ollama sigue siendo solo redacción; el manual sigue siendo la fuente.
