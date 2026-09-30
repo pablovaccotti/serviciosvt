@@ -1,0 +1,267 @@
+{
+  "version": "1.1.0",
+  "equipo": "Lavarropas",
+  "problema": "No centrifuga",
+  "descripcion": "El equipo completa (o no) el lavado pero no realiza el centrifugado. Manual piloto del schema v1.1: varias causas posibles, ninguna definitiva sin revisión en domicilio.",
+  "variantes": [
+    {
+      "id": "carga_frontal",
+      "etiqueta": "Carga frontal"
+    },
+    {
+      "id": "carga_superior",
+      "etiqueta": "Carga superior"
+    }
+  ],
+  "datos_observables": [
+    {
+      "clave": "queda_agua_tambor",
+      "pregunta": "¿Cuando termina el ciclo queda agua dentro del tambor?",
+      "objetivo": "Si queda agua, el problema está en el desagote antes que en el centrifugado.",
+      "tipo": "booleano",
+      "sinonimos": ["queda agua", "no desagota", "agua estancada", "no saca el agua"]
+    },
+    {
+      "clave": "ropa_amontonada",
+      "pregunta": "¿La ropa quedó amontonada de un lado del tambor?",
+      "objetivo": "La carga concentrada activa el sensor de desbalanceo e inhibe el centrifugado.",
+      "tipo": "booleano",
+      "sinonimos": ["amontonada", "toda junta", "de un lado", "mal distribuida", "desequilibrada"]
+    },
+    {
+      "clave": "puerta_no_traba",
+      "pregunta": "¿La puerta no traba bien o se abre durante el ciclo?",
+      "objetivo": "Sin traba de puerta el equipo no habilita el centrifugado por seguridad.",
+      "tipo": "booleano",
+      "sinonimos": ["no traba", "no cierra", "se abre", "puerta suelta", "no bloquea"]
+    },
+    {
+      "clave": "tambor_gira_lavado",
+      "pregunta": "¿El tambor gira durante el lavado, aunque después no centrifugue?",
+      "objetivo": "Si gira en lavado pero no en centrifugado, se separan fallas de transmisión/velocidad de fallas totales.",
+      "tipo": "booleano",
+      "sinonimos": ["gira en lavado", "lava bien", "se mueve al lavar"]
+    },
+    {
+      "clave": "motor_zumba",
+      "pregunta": "¿Se escucha que el motor zumba o intenta moverse cuando debería centrifugar?",
+      "objetivo": "El zumbido sin arranque es compatible con motor/capacitor antes que con electrónica.",
+      "tipo": "booleano",
+      "sinonimos": ["zumba", "zumbido", "ronronea", "intenta arrancar", "hace ruido el motor"]
+    },
+    {
+      "clave": "codigo_error",
+      "pregunta": "¿El display muestra algún código o mensaje de error?",
+      "objetivo": "Un código orienta a electrónica/comunicación antes que a mecánica.",
+      "tipo": "booleano",
+      "sinonimos": ["código", "error en display", "luz parpadea", "mensaje de error"]
+    },
+    {
+      "clave": "ruido_anormal",
+      "pregunta": "¿Hace un ruido raro o fuerte cuando intenta centrifugar?",
+      "objetivo": "El ruido anormal es compatible con transmisión/mecánica antes que con electrónica.",
+      "tipo": "booleano",
+      "sinonimos": ["ruido raro", "golpeteo", "ruido fuerte", "traqueteo", "hace ruido"]}
+  ],
+  "causas": [
+    {
+      "id": "desbalanceo_carga",
+      "nombre": "Desbalanceo de carga",
+      "descripcion": "El sensor de desbalanceo inhibe el centrifugado por ropa mal distribuida.",
+      "nivel_base": "media",
+      "aplica_variantes": ["carga_frontal", "carga_superior"],
+      "evidencia": [
+        {
+          "cuando": {"ropa_amontonada": true},
+          "efecto": "aumenta",
+          "peso": 1,
+          "motivo": "La carga concentrada es compatible con activación del sensor de desbalanceo."
+        },
+        {
+          "cuando": {"ropa_amontonada": false},
+          "efecto": "disminuye",
+          "peso": 1,
+          "motivo": "Con carga distribuida se reduce la plausibilidad del desbalanceo."
+        },
+        {
+          "cuando": {"queda_agua_tambor": true},
+          "efecto": "disminuye",
+          "peso": 1,
+          "motivo": "Con agua sin desagotar, la prioridad pasa al desagote antes que al desbalanceo."
+        }
+      ],
+      "servicios_ids": [],
+      "soluciones": [
+        {
+          "accion": "Redistribuir la carga y verificar nivelación del equipo",
+          "detalle": "El técnico debe verificar distribución de carga, suspensión y patas de nivelación en domicilio.",
+          "requiere_visita": true,
+          "servicios_ids": []
+        }
+      ]
+    },
+    {
+      "id": "problema_desagote",
+      "nombre": "Desagote obstruido (filtro/bomba)",
+      "descripcion": "El equipo no centrifuga con agua retenida: filtro de bomba o desagote obstruidos.",
+      "nivel_base": "media",
+      "aplica_variantes": ["carga_frontal", "carga_superior"],
+      "evidencia": [
+        {
+          "cuando": {"queda_agua_tambor": true},
+          "efecto": "aumenta",
+          "peso": 1,
+          "motivo": "El agua retenida es compatible con desagote obstruido."
+        },
+        {
+          "cuando": {"queda_agua_tambor": false},
+          "efecto": "disminuye",
+          "peso": 1,
+          "motivo": "Sin agua retenida se reduce la plausibilidad del desagote como causa."
+        }
+      ],
+      "servicios_ids": [],
+      "soluciones": [
+        {
+          "accion": "Revisar filtro de bomba y desagote",
+          "detalle": "El técnico debe revisar filtro, manguera y bomba de desagote en domicilio.",
+          "requiere_visita": true,
+          "servicios_ids": []
+        }
+      ]
+    },
+    {
+      "id": "blocapuertas",
+      "nombre": "Blocapuertas / traba de puerta",
+      "descripcion": "Sin traba habilitada el equipo no inicia el centrifugado por seguridad.",
+      "nivel_base": "media",
+      "aplica_variantes": ["carga_frontal", "carga_superior"],
+      "evidencia": [
+        {
+          "cuando": {"puerta_no_traba": true},
+          "efecto": "aumenta",
+          "peso": 1,
+          "motivo": "La falta de traba es compatible con inhibición del centrifugado por seguridad."
+        },
+        {
+          "cuando": {"puerta_no_traba": false},
+          "efecto": "disminuye",
+          "peso": 1,
+          "motivo": "Con traba normal se reduce la plausibilidad del blocapuertas."
+        }
+      ],
+      "servicios_ids": [],
+      "soluciones": [
+        {
+          "accion": "Revisar blocapuertas y cierre",
+          "detalle": "El técnico debe verificar el blocapuertas y su conexión en domicilio.",
+          "requiere_visita": true,
+          "servicios_ids": []
+        }
+      ]
+    },
+    {
+      "id": "correa_transmision",
+      "nombre": "Correa de transmisión",
+      "descripcion": "Correa estirada, salida de posición o cortada: el motor trabaja pero no arrastra el tambor.",
+      "nivel_base": "media",
+      "aplica_variantes": ["carga_frontal", "carga_superior"],
+      "evidencia": [
+        {
+          "cuando": {"motor_zumba": true},
+          "efecto": "aumenta",
+          "peso": 1,
+          "motivo": "Motor que intenta moverse con tambor detenido es compatible con transmisión."
+        },
+        {
+          "cuando": {"ruido_anormal": true},
+          "efecto": "aumenta",
+          "peso": 1,
+          "motivo": "El ruido anormal es compatible con falla mecánica de transmisión."
+        },
+        {
+          "cuando": {"tambor_gira_lavado": true},
+          "efecto": "disminuye",
+          "peso": 1,
+          "motivo": "Si el tambor es arrastrado en lavado, la transmisión total no está cortada."
+        }
+      ],
+      "servicios_ids": [],
+      "soluciones": [
+        {
+          "accion": "Revisar correa y transmisión",
+          "detalle": "El técnico debe revisar correa, polea y arrastre en domicilio, con el equipo desconectado.",
+          "requiere_visita": true,
+          "servicios_ids": []
+        }
+      ]
+    },
+    {
+      "id": "motor_o_capacitor",
+      "nombre": "Motor / capacitor de arranque",
+      "descripcion": "El motor no logra arrancar el centrifugado (capacitor en modelos tradicionales, entre otras).",
+      "nivel_base": "media",
+      "aplica_variantes": ["carga_frontal", "carga_superior"],
+      "evidencia": [
+        {
+          "cuando": {"motor_zumba": true},
+          "efecto": "aumenta",
+          "peso": 1,
+          "motivo": "El zumbido sin arranque es compatible con motor/capacitor."
+        },
+        {
+          "cuando": {"tambor_gira_lavado": false},
+          "efecto": "aumenta",
+          "peso": 1,
+          "motivo": "Sin movimiento en ninguna etapa, el motor es una posibilidad a revisar."
+        },
+        {
+          "cuando": {"tambor_gira_lavado": true},
+          "efecto": "disminuye",
+          "peso": 1,
+          "motivo": "Si el tambor se mueve en lavado, el motor logra trabajar en alguna etapa."
+        }
+      ],
+      "servicios_ids": [],
+      "soluciones": [
+        {
+          "accion": "Revisar motor y capacitor",
+          "detalle": "El técnico debe medir motor y capacitor en domicilio, con el equipo desconectado. No manipular componentes energizados.",
+          "requiere_visita": true,
+          "servicios_ids": []
+        }
+      ]
+    },
+    {
+      "id": "placa_electronica",
+      "nombre": "Placa electrónica / control",
+      "descripcion": "La electrónica no habilita el centrifugado (control, comunicación o salidas).",
+      "nivel_base": "media",
+      "aplica_variantes": ["carga_frontal", "carga_superior"],
+      "evidencia": [
+        {
+          "cuando": {"codigo_error": true},
+          "efecto": "aumenta",
+          "peso": 1,
+          "motivo": "El código en display es compatible con falla de control o comunicación."
+        }
+      ],
+      "servicios_ids": [],
+      "soluciones": [
+        {
+          "accion": "Revisar placa y conexiones",
+          "detalle": "El técnico debe revisar placa, conexiones y salidas en domicilio, con el equipo desconectado.",
+          "requiere_visita": true,
+          "servicios_ids": []
+        }
+      ]
+    }
+  ],
+  "restricciones": [
+    "No afirmar un diagnóstico definitivo: hablar siempre de posibilidades a confirmar por el técnico en domicilio.",
+    "No indicar al cliente que abra el equipo, manipule la placa, el capacitor, el motor ni componentes energizados.",
+    "No pedir que introduzca manos o herramientas en el tambor con el equipo conectado.",
+    "No asumir falta de repuesto ni prometer reparación sin revisión."
+  ],
+  "advertencia": "Diagnóstico preliminar orientativo elaborado con los datos informados por el cliente. El técnico debe revisar el equipo en domicilio para confirmar la causa y definir el trabajo necesario."
+}

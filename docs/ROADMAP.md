@@ -1,6 +1,6 @@
 # ServiceVT — Roadmap y Estado del Proyecto
 
-Última actualización: 2026-09-23
+Última actualización: 2026-09-30
 
 Este documento es la fuente de verdad operativa para conocer en qué estado se encuentra el desarrollo de ServiceVT.
 
@@ -1394,4 +1394,46 @@ Ver `docs/DECISIONS.md` (F6-C 18).
   determinista igual cierra en 4 (con resumen fallback equipo+falla).
 - `diagnosticResult` se reutiliza para el panel: futuros usos de ese div
   deben respetar `dataset.handoff`.
+
+---
+
+# KB Etapa 1 — Schema v1.1 + manual Lavarropas → No centrifuga
+
+**Estado:** COMPLETADA
+
+**Fecha:** 2026-09-30
+
+## Objetivo
+
+Soporte estructural del schema v1.1 y un manual piloto, sin tocar scoring,
+extractor, cierre, prompts, frontend, pagos, auth, agenda, turnos ni DB.
+
+## Implementado
+
+- `utils/motorDiagnostico.js` (único código tocado, solo `validarManual`):
+  opcionales `variantes[{id,etiqueta}]`, `aplica_variantes` referencial,
+  `sinonimos[]`, `peso` entero ≥1, `soluciones[{accion,detalle,
+  requiere_visita,servicios_ids}]`. Prohibición precio/garantía intacta,
+  `nivel_base` conservado, compatibilidad v1.0 intacta. Scoring intacto
+  (peso validado pero inerte).
+- `knowledge/diagnostico_lavarropas_no_centrifuga.json` (nuevo): 7 datos,
+  6 causas, soluciones con `servicios_ids:[]` (sin inventar), 4 restricciones.
+  Procedencia en `tests/kb-schema-v11.js` (header): confirmado vs
+  `PROPUESTA PARA VALIDAR`.
+- `tests/kb-schema-v11.js` (nuevo, 10 checks A–J). Sin tocar tests existentes.
+- Backup: `.backup-kb-etapa1-20260930-140000/` (motor).
+
+## Tests
+
+Nueva suite: 10/10 PASS. F7-A 11/11, F7-B 11/11, cierre-compat 5/5,
+límite-duro 2/2 PASS. `node --check` OK en motor y suite.
+
+## Resultado
+
+COMPLETADA. Etapa 2 (sinónimos en extractor, fix mixto, multi-manual,
+soluciones en cierre) queda como cambio separado.
+
+## Decisiones
+
+Ver `docs/DECISIONS.md` (27).
 

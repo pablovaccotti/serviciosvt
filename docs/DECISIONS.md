@@ -50,3 +50,9 @@ No borrar el historial anterior.
 ## F6-C (2026-09-23) — Chat corto con derivación a WhatsApp (COMPLETADA)
 
 18. **Bot que cierra en vez de interrogar.** Tope híbrido: el modelo señala suficiencia con línea `CIERRE: <resumen>` y el backend fuerza el cierre a los 4 mensajes del cliente (resumen fallback equipo+falla). Al cerrar, el backend devuelve `listo/resumen/whatsappUrl` (URL con `WHATSAPP_NUMBER` de `.env`, nunca hardcodeada ni 500 si falta); el frontend muestra un único botón de derivación. Sin tabla `chat`, sin tocar pagos/agenda/auth/DB. Criterio híbrido aprobado por el usuario; formato de cierre, tope 4 y tests unitarios aplicados por defecto, a confirmar.
+
+---
+
+## KB Etapa 1 (2026-09-30) — Schema v1.1 estructural + manual Lavarropas
+
+27. **Schema v1.1 aditivo e inerte.** `validarManual` acepta opcionales `variantes[]`, `aplica_variantes[]` (referencial), `sinonimos[]`, `peso` (entero ≥1, ausente = 1) y `soluciones[]` (sin precio/garantía, que siguen prohibidos). Scoring, preguntas, niveles y `resultadoPreliminar` intactos: el peso se valida pero no pondera (toda evidencia ±1). `nivel_base` se conserva como legado. Manual piloto `Lavarropas → No centrifuga` (7 datos, 6 causas, `servicios_ids:[]` sin inventar); resto del catálogo pendiente de validación técnica.
